@@ -198,6 +198,7 @@ PAGE = r"""<!doctype html>
   --low:#6ea5ec; --high:#f0954f; --mid:#22302d; --bad:#f2827a;
   color-scheme: dark; } }
 * { box-sizing: border-box; }
+[hidden] { display:none !important; }
 body { margin:0; background:var(--bg); color:var(--ink); padding:18px 16px 40px;
   font-family:"IBM Plex Sans Thai","Noto Sans Thai",Tahoma,sans-serif; line-height:1.5; }
 .wrap { max-width:1120px; margin:0 auto; display:grid; gap:16px; }
