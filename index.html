@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>สแกนเนอร์ OBD-II</title>
+  <meta name="description" content="อ่านและลบโค้ดปัญหารถยนต์ ดูค่าเซนเซอร์สด ผ่านอุปกรณ์ ELM327">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f59e0b'/%3E%3Cpath d='M8 20h16M10 20v-5a6 6 0 0 1 12 0v5M14 12h4' stroke='%23111' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">OBD</span>
+      <h1>สแกนเนอร์ OBD-II</h1>
+    </div>
+    <span id="status" class="status" data-state="idle">ยังไม่เชื่อมต่อ</span>
+  </header>
+
+  <main>
+    <section class="card" id="connect-card">
+      <h2>เชื่อมต่ออุปกรณ์</h2>
+      <p class="hint">เสียบ ELM327 เข้าพอร์ต OBD-II ใต้คอนโซลฝั่งคนขับ แล้วบิดกุญแจไปที่ ON หรือติดเครื่อง</p>
+      <div class="buttons" id="connect-buttons">
+        <button class="btn primary" id="btn-ble">เชื่อมต่อ Bluetooth</button>
+        <div class="serial-group">
+          <button class="btn" id="btn-serial">เชื่อมต่อ USB / Serial</button>
+          <label class="baud">
+            <span>Baud</span>
+            <select id="baud">
+              <option>9600</option>
+              <option selected>38400</option>
+              <option>115200</option>
+              <option>500000</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn ghost" id="btn-demo">ลองใช้งานกับรถจำลอง</button>
+      </div>
+      <div class="buttons hidden" id="connected-buttons">
+        <span class="device" id="device-name"></span>
+        <button class="btn ghost" id="btn-disconnect">ตัดการเชื่อมต่อ</button>
+      </div>
+      <p class="notice hidden" id="browser-notice"></p>
+      <p class="error hidden" id="error" role="alert"></p>
+    </section>
+
+    <section class="card summary hidden" id="summary-card">
+      <div class="mil" id="mil" data-on="false">
+        <svg viewBox="0 0 48 32" aria-hidden="true"><path d="M6 24h36M9 24v-9a6 6 0 0 1 6-6h4l2-3h8l2 3h4a6 6 0 0 1 6 6v9M19 15h10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div>
+          <div class="mil-label">ไฟเตือนเครื่องยนต์</div>
+          <div class="mil-state" id="mil-state">—</div>
+        </div>
+      </div>
+      <dl class="facts">
+        <div><dt>จำนวนโค้ด</dt><dd id="fact-count">—</dd></div>
+        <div><dt>แบตเตอรี่</dt><dd id="fact-volt">—</dd></div>
+        <div class="wide"><dt>โปรโตคอล</dt><dd id="fact-protocol">—</dd></div>
+        <div class="wide"><dt>VIN (เลขตัวถัง)</dt><dd id="fact-vin" class="mono">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="card hidden" id="dtc-card">
+      <div class="card-head">
+        <h2>โค้ดปัญหา (DTC)</h2>
+        <div class="buttons">
+          <button class="btn primary" id="btn-read">อ่านโค้ด</button>
+          <button class="btn danger" id="btn-clear">ลบโค้ด</button>
+        </div>
+      </div>
+      <div id="dtc-results">
+        <p class="empty">กด “อ่านโค้ด” เพื่อดึงโค้ดปัญหาจากกล่อง ECU</p>
+      </div>
+    </section>
+
+    <section class="card hidden" id="freeze-card">
+      <div class="card-head">
+        <h2>Freeze Frame</h2>
+      </div>
+      <p class="hint">ค่าต่าง ๆ ของเครื่องยนต์ที่ถูกบันทึกไว้ ณ ตอนที่เกิดปัญหา</p>
+      <div id="freeze-results"></div>
+    </section>
+
+    <section class="card hidden" id="live-card">
+      <div class="card-head">
+        <h2>ค่าเซนเซอร์สด</h2>
+        <button class="btn primary" id="btn-live">เริ่มอ่านค่า</button>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </section>
+
+    <details class="card log-card">
+      <summary>บันทึกการสื่อสาร (สำหรับตรวจสอบปัญหา)</summary>
+      <pre id="log" class="log"></pre>
+    </details>
+
+    <footer class="footnote">
+      <p>⚠️ ห้ามใช้งานแอปขณะขับรถ ให้ผู้โดยสารเป็นคนดูหรือจอดรถก่อน</p>
+      <p>การลบโค้ดไม่ได้ซ่อมรถ ถ้าต้นเหตุยังอยู่ โค้ดและไฟเตือนจะกลับมาอีก</p>
+    </footer>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
