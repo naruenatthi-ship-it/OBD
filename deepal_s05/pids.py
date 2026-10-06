@@ -17,6 +17,7 @@ BMS_HEADER = "7A1"
 VALIDATED = "validated"
 CANDIDATE = "candidate"
 EXPERIMENTAL = "experimental"
+CUSTOM = "custom"  # added by the user with --signals
 
 DEFAULT_CAPACITY_KWH = 56.1
 

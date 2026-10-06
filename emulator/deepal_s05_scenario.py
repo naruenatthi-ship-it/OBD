@@ -2,7 +2,7 @@
 56.1 kWh pack, answering the DIDs listed in deepal_s05/pids.py.
 
 The values are made up for testing, not recorded from a car. So are the
-per-cell DID 22F2A0, the extended session support and the second ECU at
+per-cell DID 22F2A0, the temperature sensor DID 22F2A1, the extended session support and the second ECU at
 761/769 (standing in for the on-board charger): they exist only to exercise
 the discover and ecus commands. The real addresses and DIDs are unknown.
 
@@ -82,6 +82,8 @@ ObdMessage = {
         "SOH": entry("SOH", "F27D", "0F 0F 78"),                    # 98.7 %
         "EFC": entry("EFC (experimental)", "F27F", "31 0D C8 F8"),  # 14.67
         "CELLS": entry("Cell voltages (made up)", "F2A0", cell_voltages()),
+        "TEMPS": entry("Temperature sensors (made up)", "F2A1",
+                       "45 46 46 47 45 46 47 48 46 45 46 47 48 48 47 46"),
         "BMS_PART": entry("Part number", "F187", ascii_hex("DEMO-BMS-01")),
         "BMS_SW": entry("Software version", "F195", ascii_hex("V1.00")),
         "BMS_EXT": fixed("Extended session", "1003", "50 03 00 32 01 F4"),

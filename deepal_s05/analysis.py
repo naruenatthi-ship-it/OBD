@@ -159,3 +159,70 @@ def read_sniff_log(path):
                     ts = 0.0
                 frames.append((ts, parsed[0], parsed[1]))
     return frames
+
+
+def linear_fit(xs, ys):
+    """Least-squares fit y = a + b*x. Returns (a, b, r2) or None."""
+    n = len(xs)
+    if n < 3:
+        return None
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    if sxx == 0:
+        return None
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    b = sxy / sxx
+    a = my - b * mx
+    ss_tot = sum((y - my) ** 2 for y in ys)
+    ss_res = sum((y - a - b * x) ** 2 for x, y in zip(xs, ys))
+    r2 = 1 - ss_res / ss_tot if ss_tot else 0.0
+    return a, b, r2
+
+
+def estimate_ir(currents, voltages, min_range_a=20.0):
+    """Internal resistance from how voltage moves with current: the slope of
+    V against I. The current sign convention does not matter because the
+    magnitude of the slope is used. Returns a dict with r_mohm (None when the
+    current did not vary enough), r2, n and i_range."""
+    i_range = max(currents) - min(currents) if currents else 0.0
+    out = {"n": len(currents), "i_range": i_range, "r_mohm": None,
+           "r2": None}
+    if i_range < min_range_a:
+        return out
+    fit = linear_fit(currents, voltages)
+    if fit is None:
+        return out
+    out["r_mohm"] = abs(fit[1]) * 1000
+    out["r2"] = fit[2]
+    return out
+
+
+def balance_status(history, window_s=1800, stable_mv=1.0, full_soc=99):
+    """Judge balancing from [(time, soc, delta_mv)] samples, oldest first.
+
+    Returns (state, text) where state is one of: no_data, not_full,
+    collecting, improving, rising, stable."""
+    usable = [(t, s, d) for t, s, d in history
+              if d is not None and s is not None]
+    if not usable:
+        return "no_data", "ยังไม่มีข้อมูลส่วนต่างแรงดันเซลล์"
+    t_now, soc_now, d_now = usable[-1]
+    if soc_now < full_soc:
+        return "not_full", ("SOC %.0f%% ยังไม่เต็ม BMS จะบาลานซ์ได้ดีตอนใกล้ 100%%"
+                            % soc_now)
+    full = [x for x in usable if x[1] >= full_soc]
+    if t_now - full[0][0] < window_s:
+        return "collecting", ("เต็มแล้ว กำลังเก็บข้อมูล (%d/%d นาที) ส่วนต่างตอนนี้ %.1f mV"
+                              % ((t_now - full[0][0]) // 60, window_s // 60,
+                                 d_now))
+    past = [x for x in full if x[0] <= t_now - window_s][-1]
+    change = d_now - past[2]
+    minutes = (t_now - past[0]) / 60
+    if abs(change) <= stable_mv:
+        return "stable", ("ส่วนต่างนิ่งแล้วที่ %.1f mV (เปลี่ยนไม่เกิน %.1f mV ใน %.0f นาที)"
+                          % (d_now, stable_mv, minutes))
+    if change < 0:
+        return "improving", ("ส่วนต่างลดลง %.1f mV ใน %.0f นาที (ตอนนี้ %.1f mV) BMS กำลังบาลานซ์"
+                             % (-change, minutes, d_now))
+    return "rising", ("ส่วนต่างเพิ่มขึ้น %.1f mV ใน %.0f นาที (ตอนนี้ %.1f mV)"
+                      % (change, minutes, d_now))

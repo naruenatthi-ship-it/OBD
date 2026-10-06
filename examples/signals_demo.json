@@ -1,0 +1,15 @@
+{
+  "_comment": "ใช้กับตัวจำลอง (emulator/run_emulator.py) เท่านั้น DID และ header ในไฟล์นี้แต่งขึ้น ไม่ใช่ของรถจริง",
+  "signals": [
+    {"key": "obc_temp", "label": "อุณหภูมิ OBC", "header": "761",
+     "did": "F2C1", "formula": "A-40", "unit": "C"}
+  ],
+  "arrays": [
+    {"key": "cells", "label": "แรงดันรายเซลล์", "header": "7A1",
+     "did": "F2A0", "offset": 0, "count": 108, "bytes": 2,
+     "scale": 0.001, "unit": "V"},
+    {"key": "temps", "label": "เซนเซอร์อุณหภูมิแบต", "header": "7A1",
+     "did": "F2A1", "offset": 0, "count": 16, "bytes": 1,
+     "add": -40, "unit": "C"}
+  ]
+}

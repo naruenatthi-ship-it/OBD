@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "emulator"))
 from run_emulator import start  # noqa: E402
 
 from deepal_s05 import pids  # noqa: E402
-from deepal_s05.cli import main, read_signals  # noqa: E402
+from deepal_s05.cli import main  # noqa: E402
+from deepal_s05.snapshot import read_signals  # noqa: E402
 from deepal_s05.elm327 import Elm327, NegativeResponse  # noqa: E402
 
 
@@ -80,3 +81,65 @@ def test_cli_discover_finds_cells(url, tmp_path, capsys):
     assert "22F2A0  216" in out
     assert "อาจเป็นแรงดันรายเซลล์: 108 ค่า" in out
     assert "F2A0" in out_csv.read_text(encoding="utf-8")
+
+
+DEMO = os.path.join(os.path.dirname(__file__), "..", "examples",
+                    "signals_demo.json")
+
+
+def test_check_with_custom_signals(url, capsys):
+    assert main(["--port", url, "--signals", DEMO, "check"]) == 0
+    out = capsys.readouterr().out
+    assert "อุณหภูมิ OBC" in out and " 50 C" in out
+    assert "108 ค่า" in out and "(#47)" in out and "(#83)" in out
+    assert "แบต 12V" in out
+
+
+def test_charge_and_health(url, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["--port", url, "--signals", DEMO, "charge", "--interval",
+                 "0", "--duration", "0.001", "--csv", "c.csv",
+                 "--label", "16A"]) == 0
+    assert "cells_108" in (tmp_path / "c.csv").read_text(encoding="utf-8")
+    assert main(["--port", url, "health", "--samples", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "SOC ช่วงกลาง" in out
+    assert (tmp_path / "health_history.csv").exists()
+
+
+def test_dashboard_data(url):
+    import json
+    import threading
+    import urllib.request
+
+    from deepal_s05 import config, dashboard
+
+    signals, arrays = config.load(DEMO)
+    with Elm327(url) as elm:
+        elm.initialize()
+        poller = dashboard.Poller(elm, pids.SIGNALS[:3] + signals, arrays,
+                                  56.1, interval=0.2)
+        server = dashboard.make_server(poller, "127.0.0.1", 0)
+        port = server.server_address[1]
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        poller.start()
+        try:
+            deadline = time.monotonic() + 20
+            while True:
+                data = json.load(urllib.request.urlopen(
+                    "http://127.0.0.1:%d/data" % port))
+                if data["time"] or time.monotonic() > deadline:
+                    break
+                time.sleep(0.2)
+            page = urllib.request.urlopen(
+                "http://127.0.0.1:%d/" % port).read().decode()
+        finally:
+            poller.stop.set()
+            poller.join(5)
+            server.shutdown()
+            server.server_close()
+    assert data["error"] is None
+    assert len(data["arrays"]["cells"]) == 108
+    assert data["values"]["obc_temp"] == 50
+    assert data["custom"] == ["obc_temp"]
+    assert "Deepal S05" in page

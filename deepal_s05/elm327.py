@@ -167,6 +167,14 @@ class Elm327:
             info["voltage"] = ""
         return info
 
+    def battery_voltage(self):
+        """12 V battery voltage measured by the adapter at the OBD port."""
+        reply = self.command("ATRV")
+        m = re.search(r"(\d+(?:\.\d+)?)\s*V", reply.upper())
+        if not m:
+            raise ElmError("ATRV: %r" % reply)
+        return float(m.group(1))
+
     def set_header(self, header):
         """Address requests to `header` and only accept its response id."""
         if header == self.header:
