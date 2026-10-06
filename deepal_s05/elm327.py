@@ -1,6 +1,7 @@
 """Minimal ELM327 client for reading UDS DIDs (service 0x22) over CAN.
 
-Only read-type requests are exposed: ReadDataByIdentifier (0x22), switching
+Only read-type requests are exposed: ReadDataByIdentifier (0x22),
+ReadDTCInformation by status mask (0x19 02), switching
 between the default and extended diagnostic session (0x10 01/03) and
 TesterPresent (0x3E). The client never sends write, routine, security
 access, reset or DTC-clear services to the vehicle.
@@ -100,7 +101,8 @@ def response_header(request_header):
 
 
 # Requests the client is allowed to put on the bus (hex, no spaces)
-ALLOWED_REQUESTS = re.compile(r"^(22[0-9A-F]{4}|1001|1003|3E00)$")
+ALLOWED_REQUESTS = re.compile(
+    r"^(22[0-9A-F]{4}|1902[0-9A-F]{2}|1001|1003|3E00)$")
 
 
 class Elm327:
@@ -226,6 +228,11 @@ class Elm327:
         if len(msg) < 3 or (msg[1] << 8 | msg[2]) != did:
             raise NoData("reply for another DID: %s" % msg.hex().upper())
         return msg[3:]
+
+    def read_dtcs(self, header, mask=0xFF):
+        """ReadDTCInformation, reportDTCByStatusMask. Returns the raw
+        positive response (59 02 ...)."""
+        return self._positive(header, "1902%02X" % mask)
 
     def start_session(self, header, extended=True):
         """DiagnosticSessionControl: extended (0x03) or default (0x01)."""

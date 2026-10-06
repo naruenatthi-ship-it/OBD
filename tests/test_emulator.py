@@ -143,3 +143,23 @@ def test_dashboard_data(url):
     assert data["values"]["obc_temp"] == 50
     assert data["custom"] == ["obc_temp"]
     assert "Deepal S05" in page
+
+
+def test_cli_dtc(url, tmp_path, capsys):
+    out_csv = tmp_path / "dtc.csv"
+    assert main(["--port", url, "dtc", "--headers", "761,7A1,7B0",
+                 "--save", str(out_csv)]) == 0
+    out = capsys.readouterr().out
+    assert "P0562-16" in out and "แรงดันระบบ 12V ต่ำ" in out
+    assert "P0A80-00" in out and "ECU ที่ตอบ 2 กล่อง" in out
+    assert "P0562-16" in out_csv.read_text(encoding="utf-8")
+
+
+def test_cli_aux12v(url, tmp_path, capsys):
+    out_csv = tmp_path / "a.csv"
+    assert main(["--port", url, "aux12v", "--interval", "0", "--count", "3",
+                 "--csv", str(out_csv)]) == 0
+    assert "สรุป" in capsys.readouterr().out
+    rows = out_csv.read_text(encoding="utf-8").splitlines()
+    assert rows[0].startswith("time,elapsed_s,label,aux_12v")
+    assert len(rows) == 4

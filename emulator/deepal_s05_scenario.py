@@ -2,7 +2,7 @@
 56.1 kWh pack, answering the DIDs listed in deepal_s05/pids.py.
 
 The values are made up for testing, not recorded from a car. So are the
-per-cell DID 22F2A0, the temperature sensor DID 22F2A1, the extended session support and the second ECU at
+per-cell DID 22F2A0, the temperature sensor DID 22F2A1, the trouble codes, the extended session support and the second ECU at
 761/769 (standing in for the on-board charger): they exist only to exercise
 the discover and ecus commands. The real addresses and DIDs are unknown.
 
@@ -93,6 +93,12 @@ ObdMessage = {
                           OBC_REQ, OBC_RSP),
         "OBC_TEMP": entry("Temperature (made up)", "F2C1", "5A",
                           OBC_REQ, OBC_RSP),
+        # Made-up trouble codes: BMS P0A80-00 (confirmed) and U0111-00
+        # (failed since clear), OBC P0562-16 (failed now, confirmed)
+        "BMS_DTC": fixed("Trouble codes", "1902FF",
+                         "59 02 FF 0A 80 00 08 C1 11 00 20"),
+        "OBC_DTC": fixed("Trouble codes", "1902FF", "59 02 FF 05 62 16 09",
+                         OBC_REQ, OBC_RSP),
         # Any other DID: requestOutOfRange, like a real ECU
         "OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31"),
         "OBC_OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31",

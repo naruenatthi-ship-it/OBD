@@ -7,7 +7,7 @@ import json
 import sys
 import time
 
-from . import analysis, config, pids, snapshot
+from . import analysis, config, dtc, pids, snapshot
 from .elm327 import (
     Elm327, ElmError, NegativeResponse, NoData, response_header)
 
@@ -35,13 +35,11 @@ def fmt(value):
 
 
 def connect(args):
-    log = None
-    if args.verbose:
-        def log(direction, text):
-            print("   %s %s" % (direction, text.replace("\n", " | ")),
-                  file=sys.stderr)
+    def show(direction, text):
+        print("   %s %s" % (direction, text.replace("\n", " | ")),
+              file=sys.stderr)
     elm = Elm327(args.port, baudrate=args.baud, timeout=args.timeout,
-                 log=log)
+                 log=show if args.verbose else None)
     info = elm.initialize()
     print("กล่อง OBD: %s   แรงดันขั้ว OBD: %s" % (
         info["version"], info["voltage"] or "-"))
@@ -395,6 +393,114 @@ def cmd_health(args):
     return 0
 
 
+def header_list(args):
+    if args.headers:
+        return [h.strip().upper() for h in args.headers.split(",") if h.strip()]
+    return ["%03X" % h for h in range(int(args.start, 16),
+                                      int(args.end, 16) + 1)]
+
+
+def cmd_dtc(args):
+    headers = header_list(args)
+    found = []
+    answered = 0
+    with connect(args) as elm:
+        print("\nอ่านโค้ดปัญหาจาก %d header (อ่านอย่างเดียว ไม่ลบโค้ด)"
+              " กด Ctrl+C เพื่อหยุด\n" % len(headers))
+        try:
+            for header in headers:
+                if len(headers) > 16 and int(header, 16) % 16 == 0:
+                    print("  ...%s" % header, file=sys.stderr)
+                try:
+                    try:
+                        msg = elm.read_dtcs(header, 0xFF)
+                    except NegativeResponse as e:
+                        if e.nrc != 0x31:
+                            raise
+                        msg = elm.read_dtcs(header, 0x09)
+                except NegativeResponse as e:
+                    answered += 1
+                    print("ECU %s: ไม่ให้อ่านโค้ด (%s)" % (header, e))
+                    continue
+                except NoData:
+                    continue
+                answered += 1
+                records = dtc.parse_response(msg)
+                shown = records if args.all else \
+                    [r for r in records if r["active"]]
+                print("ECU %s -> %s: %s" % (
+                    header, response_header(header),
+                    "%d โค้ด" % len(shown) if shown else "ไม่มีโค้ด"))
+                for r in shown:
+                    print("    %-10s %-40s %s" % (
+                        r["code"], r["status_text"], r["description"]))
+                    found.append(dict(r, header=header))
+        except KeyboardInterrupt:
+            print("\nหยุดแล้ว")
+    print("\nECU ที่ตอบ %d กล่อง  พบโค้ด %d รายการ" % (answered, len(found)))
+    if any(r["description"] == dtc.MANUFACTURER_SPECIFIC for r in found):
+        print("โค้ดเฉพาะผู้ผลิตไม่มีคำอธิบายเปิดเผย ให้จดรหัสไปถามช่างหรือค้นต่อ")
+    if args.save:
+        with open(args.save, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, ["header", "code", "status",
+                                   "status_text", "description"],
+                               extrasaction="ignore")
+            w.writeheader()
+            w.writerows(dict(r, status="0x%02X" % r["status"])
+                        for r in found)
+        print("บันทึกไว้ที่ %s" % args.save)
+    return 0
+
+
+def cmd_aux12v(args):
+    path = args.csv or "aux12v_%s.csv" % datetime.datetime.now().strftime(
+        "%Y%m%d_%H%M")
+    readings = []
+    with connect(args) as elm, snapshot.CsvLog(path, args.label) as log:
+        print("วัดเฉพาะแรงดันแบต 12V ที่กล่องวัดเอง (ATRV) ไม่ส่งข้อความเข้ารถ"
+              " จึงไม่ไปปลุกรถ")
+        print("บันทึกทุก %g วินาทีลง %s  กด Ctrl+C เพื่อหยุด\n" % (
+            args.interval, path))
+        end = time.time() + args.hours * 3600 if args.hours else None
+        count = 0
+        try:
+            while True:
+                try:
+                    v = elm.battery_voltage()
+                except ElmError as e:
+                    print("%s  อ่านไม่ได้ (%s) กล่องอาจเข้าโหมดพัก" % (
+                        datetime.datetime.now().strftime("%H:%M:%S"), e))
+                    v = None
+                if v is not None:
+                    now = time.time()
+                    log.write(snapshot.Snapshot(now, {"aux_12v": v}))
+                    readings.append((now, v))
+                    print("%s  %.2f V  %s" % (
+                        datetime.datetime.now().strftime("%H:%M:%S"), v,
+                        analysis.aux12v_state(v)))
+                count += 1
+                if args.count and count >= args.count:
+                    break
+                if end and time.time() >= end:
+                    break
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nหยุดแล้ว")
+    s = analysis.aux12v_summary(readings)
+    if s:
+        print("\nสรุป %.1f ชั่วโมง %d ค่า: ต่ำสุด %.2f V  สูงสุด %.2f V" % (
+            s["hours"], s["n"], s["min"], s["max"]))
+        print("DC-DC เริ่มชาร์จแบต 12V %d ครั้ง (รถตื่นขึ้นมาเอง เช่น"
+              " อัปเดตข้อมูลผ่านแอป)" % s["wakes"])
+        if s["trend_v_per_h"] is not None:
+            print("ตอนพัก แรงดันเปลี่ยน %+.3f V ต่อชั่วโมง" % s["trend_v_per_h"])
+        print("ค่าตอนพักใช้ได้หลังรถดับอย่างน้อย 1-2 ชั่วโมง"
+              " เกณฑ์ที่แสดงเป็นของแบตตะกั่วกรด")
+    print("บันทึกไว้ที่ %s\nดูกราฟ: python -m deepal_s05 report %s" % (
+        path, path))
+    return 0
+
+
 def cmd_report(args):
     from . import report
     out = report.write_report(args.files, args.out, args.capacity)
@@ -689,6 +795,25 @@ def build_parser():
     h.add_argument("--history", default="health_history.csv",
                    help="ไฟล์เก็บประวัติผลตรวจ")
     h.set_defaults(func=cmd_health)
+
+    t = sub.add_parser("dtc", help="อ่านโค้ดปัญหาจากทุก ECU (ไม่ลบโค้ด)")
+    t.add_argument("--headers", help="ระบุ header เอง เช่น 7A1,761")
+    t.add_argument("--start", default="700")
+    t.add_argument("--end", default="7FF")
+    t.add_argument("--all", action="store_true",
+                   help="แสดงทุกโค้ดที่ ECU ส่งมา รวมที่ไม่มีสถานะใช้งาน")
+    t.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
+    t.set_defaults(func=cmd_dtc)
+
+    x = sub.add_parser("aux12v",
+                       help="เฝ้าแรงดันแบต 12V โดยไม่ส่งข้อความเข้ารถ")
+    x.add_argument("--interval", type=float, default=300,
+                   help="วินาทีระหว่างการวัด (ค่าเริ่มต้น 300 = 5 นาที)")
+    x.add_argument("--hours", type=float, help="หยุดเองหลังกี่ชั่วโมง")
+    x.add_argument("--count", type=int, default=0)
+    x.add_argument("--csv", help="ไฟล์ CSV (ค่าเริ่มต้นตั้งชื่อตามเวลา)")
+    x.add_argument("--label", default="12V")
+    x.set_defaults(func=cmd_aux12v)
 
     r = sub.add_parser("report",
                        help="ทำกราฟจากไฟล์ CSV ของ charge/live (ไม่ต้องใส่ --port)")

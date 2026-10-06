@@ -226,3 +226,39 @@ def balance_status(history, window_s=1800, stable_mv=1.0, full_soc=99):
                              % (-change, minutes, d_now))
     return "rising", ("ส่วนต่างเพิ่มขึ้น %.1f mV ใน %.0f นาที (ตอนนี้ %.1f mV)"
                       % (change, minutes, d_now))
+
+
+CHARGING_V = 13.2  # above this the DC-DC converter is charging the 12 V
+
+
+def aux12v_state(v):
+    """Rough reading of a 12 V lead-acid battery voltage."""
+    if v >= CHARGING_V:
+        return "DC-DC กำลังชาร์จแบต 12V (รถตื่นอยู่)"
+    if v >= 12.6:
+        return "เต็ม"
+    if v >= 12.4:
+        return "ค่อนข้างดี"
+    if v >= 12.2:
+        return "ปานกลาง"
+    return "ต่ำ ควรตรวจแบต 12V"
+
+
+def aux12v_summary(readings):
+    """[(time, volts)] -> min/max, times the DC-DC switched on, and the
+    resting voltage trend in V per hour (readings below CHARGING_V)."""
+    if not readings:
+        return None
+    volts = [v for _, v in readings]
+    wakes = sum(1 for (_, a), (_, b) in zip(readings, readings[1:])
+                if a < CHARGING_V <= b)
+    rest = [(t, v) for t, v in readings if v < CHARGING_V]
+    trend = None
+    if len(rest) >= 3 and rest[-1][0] - rest[0][0] >= 600:
+        fit = linear_fit([(t - rest[0][0]) / 3600 for t, _ in rest],
+                         [v for _, v in rest])
+        if fit:
+            trend = fit[1]
+    return {"min": min(volts), "max": max(volts), "wakes": wakes,
+            "trend_v_per_h": trend, "n": len(readings),
+            "hours": (readings[-1][0] - readings[0][0]) / 3600}
