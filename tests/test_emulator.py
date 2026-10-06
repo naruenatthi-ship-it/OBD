@@ -1,5 +1,6 @@
 """End-to-end test against ELM327-emulator with the deepal_s05 scenario."""
 
+import json
 import os
 import socket
 import sys
@@ -145,7 +146,8 @@ def test_dashboard_data(url):
     assert "Deepal S05" in page
 
 
-def test_cli_dtc(url, tmp_path, capsys):
+def test_cli_dtc(url, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     out_csv = tmp_path / "dtc.csv"
     assert main(["--port", url, "dtc", "--headers", "761,7A1,7B0",
                  "--save", str(out_csv)]) == 0
@@ -163,3 +165,32 @@ def test_cli_aux12v(url, tmp_path, capsys):
     rows = out_csv.read_text(encoding="utf-8").splitlines()
     assert rows[0].startswith("time,elapsed_s,label,aux_12v")
     assert len(rows) == 4
+
+
+def test_checkup_twice_compares(url, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = ["--port", url, "checkup", "--headers", "761,7A1",
+            "--samples", "1"]
+    assert main(args) == 0
+    out = capsys.readouterr().out
+    assert "ผลรวม: ⚠️ ควรเฝ้าดู" in out and "P0562-16" in out
+    assert main(["--port", url, "checkup", "--headers", "7A1",
+                 "--samples", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "เทียบกับการตรวจครั้งก่อน" in out
+    rows = (tmp_path / "checkup_history.csv").read_text(
+        encoding="utf-8").splitlines()
+    assert len(rows) == 3
+    assert main(["trends"]) == 0
+    assert (tmp_path / "trends.html").exists()
+
+
+def test_live_alert_from_signals_file(url, tmp_path, capsys):
+    path = tmp_path / "s.json"
+    data = json.load(open(DEMO, encoding="utf-8"))
+    data["alerts"] = [{"key": "obc_temp", "label": "อุณหภูมิ OBC",
+                       "unit": "C", "warn_above": 45}]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert main(["--port", url, "--signals", str(path), "live",
+                 "--count", "1"]) == 0
+    assert "⚠️ อุณหภูมิ OBC 50 C (เกณฑ์ > 45)" in capsys.readouterr().out

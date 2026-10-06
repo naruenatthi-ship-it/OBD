@@ -13,6 +13,8 @@ with discover/sniff can be used without editing the code.
   ]
 }
 
+An optional "alerts" list overrides or adds warning limits, see alerts.py.
+
 Formulas use A, B, C ... for the data bytes after the DID (like Car
 Scanner/Torque) and CAP for the pack capacity in kWh. Arrays named "cells"
 (cell voltages) and "temps" (temperature sensors) are drawn by the
@@ -160,3 +162,28 @@ def load(path):
     if clash:
         raise ConfigError("ชื่อ key ซ้ำ: %s" % ", ".join(sorted(clash)))
     return signals, arrays
+
+
+ALERT_NUMBERS = ("warn_above", "critical_above", "warn_below",
+                 "critical_below")
+
+
+def load_alerts(path):
+    """Alert rule overrides from the "alerts" list of the --signals file."""
+    if not path:
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            items = json.load(f).get("alerts", [])
+        out = []
+        for item in items:
+            if "key" not in item:
+                raise ConfigError("alerts ทุกรายการต้องมี key")
+            clean = dict(item)
+            for k in ALERT_NUMBERS:
+                if k in clean and clean[k] is not None:
+                    clean[k] = float(clean[k])
+            out.append(clean)
+    except (OSError, ValueError, TypeError) as e:
+        raise ConfigError("อ่าน alerts ใน %s ไม่ได้: %s" % (path, e))
+    return out

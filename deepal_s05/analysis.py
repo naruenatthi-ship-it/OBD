@@ -262,3 +262,46 @@ def aux12v_summary(readings):
     return {"min": min(volts), "max": max(volts), "wakes": wakes,
             "trend_v_per_h": trend, "n": len(readings),
             "hours": (readings[-1][0] - readings[0][0]) / 3600}
+
+
+def charge_power_status(samples, expected_kw=None, taper_soc=95, runs=3):
+    """Spot an AC charge that delivers less than it should, which is how an
+    on-board charger protecting itself from heat shows up.
+
+    samples: [(soc, power_kw)] oldest first; the sign of the power is
+    ignored. Returns (state, text) with state ok / taper / low / drop /
+    no_data."""
+    usable = [(s, abs(p)) for s, p in samples
+              if s is not None and p is not None]
+    if not usable:
+        return "no_data", ""
+    soc, kw = usable[-1]
+    if soc >= taper_soc:
+        return "taper", "SOC สูง กำลังชาร์จลดลงตามปกติ"
+    recent = [p for s, p in usable[-runs:] if s < taper_soc]
+    if expected_kw and len(recent) >= runs and \
+            all(p < 0.75 * expected_kw for p in recent):
+        return "low", ("กำลังเข้าแบต %.1f kW ต่ำกว่าที่ควร (~%.1f kW) ต่อเนื่อง"
+                       " อาจเป็น OBC ลดกำลังเพราะร้อน หรือไฟบ้านตก"
+                       % (kw, expected_kw))
+    peak = max((p for s, p in usable if s < taper_soc), default=0)
+    if peak > 1 and len(recent) >= runs and \
+            all(p < 0.8 * peak for p in recent):
+        return "drop", ("กำลังชาร์จลดลง %.0f%% จากสูงสุด %.1f kW ทั้งที่ SOC"
+                        " ยังไม่สูง อาจเป็น OBC ลดกำลังเพราะร้อน"
+                        % ((1 - kw / peak) * 100, peak))
+    return "ok", "กำลังชาร์จ %.1f kW" % kw
+
+
+def power_drop(samples, taper_soc=95):
+    """Largest fall from an earlier peak while SOC < taper_soc, as a
+    fraction (0.25 = 25 %), for the report summary."""
+    peak, worst = 0.0, 0.0
+    for s, p in samples:
+        if s is None or p is None or s >= taper_soc:
+            continue
+        p = abs(p)
+        peak = max(peak, p)
+        if peak > 1:
+            worst = max(worst, 1 - p / peak)
+    return worst

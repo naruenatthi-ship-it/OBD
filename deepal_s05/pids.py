@@ -96,7 +96,8 @@ SIGNALS_BY_KEY = {s.key: s for s in SIGNALS}
 
 # Signals shown by the "live" command
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
-             "cell_v_min", "batt_temp_max", "batt_temp_min", "soh"]
+             "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
+             "charge_temp"]
 
 
 def derived(values):

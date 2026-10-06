@@ -6,7 +6,7 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import pids, snapshot
+from . import alerts, pids, snapshot
 from .elm327 import ElmError
 
 LABELS = {
@@ -23,8 +23,10 @@ LABELS = {
 
 class Poller(threading.Thread):
     def __init__(self, elm, signals, arrays, capacity, interval,
-                 csv_log=None):
+                 csv_log=None, rules=None, notifier=None):
         super().__init__(daemon=True)
+        self.rules = alerts.DEFAULT_RULES if rules is None else rules
+        self.notifier = notifier
         self.elm, self.signals, self.arrays = elm, signals, arrays
         self.capacity, self.interval, self.csv_log = capacity, interval, \
             csv_log
@@ -35,6 +37,7 @@ class Poller(threading.Thread):
                        if s.status == pids.CUSTOM})
         labels.update({a.key: (a.label, a.unit) for a in arrays})
         self.data = {"time": None, "values": {}, "arrays": {}, "errors": {},
+                     "alerts": [],
                      "error": "กำลังอ่านค่าครั้งแรก...", "labels": labels,
                      "custom": [s.key for s in signals
                                 if s.status == pids.CUSTOM]}
@@ -46,10 +49,18 @@ class Poller(threading.Thread):
                                      self.capacity)
                 if self.csv_log:
                     self.csv_log.write(snap)
+                values = dict(snap.values)
+                values["delta_mv"] = values.get(
+                    "cells_delta_mv", values.get("cell_delta_mv"))
+                found = alerts.evaluate(values, self.rules)
+                if self.notifier and found:
+                    self.notifier.notify(found)
                 with self.lock:
                     self.data.update(time=snap.time, values=snap.values,
                                      arrays=snap.arrays, errors=snap.errors,
-                                     error=None)
+                                     error=None, alerts=[
+                                         {"level": a.level, "text": a.text()}
+                                         for a in found])
             except (ElmError, OSError) as e:
                 with self.lock:
                     self.data["error"] = "อ่านค่าไม่ได้: %s" % e
@@ -89,9 +100,10 @@ def make_server(poller, host="127.0.0.1", port=8000):
 
 
 def serve(elm, signals, arrays, capacity, host="127.0.0.1", port=8000,
-          interval=2.0, csv_path=None):
+          interval=2.0, csv_path=None, rules=None, notifier=None):
     csv_log = snapshot.CsvLog(csv_path) if csv_path else None
-    poller = Poller(elm, signals, arrays, capacity, interval, csv_log)
+    poller = Poller(elm, signals, arrays, capacity, interval, csv_log,
+                    rules, notifier)
     server = make_server(poller, host, port)
     poller.start()
     shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
@@ -153,9 +165,14 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 .chart { overflow-x:auto; } .chart svg { width:100%; min-width:540px; height:auto; display:block; }
 .chart text { fill:var(--muted); font:11px ui-monospace,Menlo,Consolas,monospace; }
 .note { font-size:.86rem; color:var(--muted); max-width:70ch; }
+.alerts { display:grid; gap:6px; }
+.alert { border-radius:10px; padding:10px 12px; border:1px solid var(--line);
+  background:var(--surface); font-size:.92rem; border-left:5px solid var(--high); }
+.alert.crit { border-left-color:var(--bad); font-weight:600; }
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
 <header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div></header>
+<div class="alerts" id="alerts"></div>
 <div class="summary" id="summary"></div>
 <section class="panel" id="cellsPanel" hidden><h2 id="cellsTitle">แรงดันรายเซลล์</h2>
 <div class="cells" id="cells"></div>
@@ -176,6 +193,10 @@ function render(d) {
   var age = d.time ? (Date.now()/1000 - d.time) : null;
   if (d.error) { st.textContent = d.error; st.className = 'status err'; }
   else { st.textContent = 'อัปเดต ' + new Date(d.time*1000).toLocaleTimeString('th-TH') + (age > 15 ? ' (ข้อมูลเก่า)' : ''); st.className = 'status' + (age > 15 ? ' err' : ''); }
+  document.getElementById('alerts').innerHTML = (d.alerts||[]).map(function(a){
+    var div = document.createElement('div'); div.textContent = a.text;
+    return '<div class="alert'+(a.level>=3?' crit':'')+'">'+div.innerHTML+'</div>';
+  }).join('');
   var v = d.values || {}, cells = (d.arrays||{}).cells, temps = (d.arrays||{}).temps;
   var hi = cells ? v.cells_max : v.cell_v_max, lo = cells ? v.cells_min : v.cell_v_min;
   var delta = v.cells_delta_mv !== undefined ? v.cells_delta_mv : v.cell_delta_mv;

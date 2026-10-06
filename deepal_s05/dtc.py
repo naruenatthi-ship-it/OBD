@@ -1,5 +1,7 @@
 """Diagnostic trouble codes read with UDS ReadDTCInformation (19 02)."""
 
+import json
+
 # Status byte bits (ISO 14229-1)
 TEST_FAILED = 0x01
 PENDING = 0x04
@@ -81,3 +83,46 @@ def parse_response(msg):
                         "description": describe(code),
                         "active": bool(status & ACTIVE_MASK)})
     return records
+
+
+def load_history(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def save_scan(path, scan, keep=100):
+    history = load_history(path)
+    history.append(scan)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(history[-keep:], f, ensure_ascii=False, indent=1)
+
+
+def make_scan(answered, records, when, scanned):
+    return {"time": when, "answered": sorted(answered),
+            "scanned": sorted(scanned),
+            "codes": [{"header": r["header"], "code": r["code"],
+                       "status": r["status"]} for r in records]}
+
+
+def diff(prev, cur):
+    """Compare two scans from make_scan. Codes are matched by ECU and code;
+    only ECUs answering in both scans count as cleared."""
+    if not prev:
+        return None
+    p = {(c["header"], c["code"]): c["status"] for c in prev["codes"]}
+    c = {(x["header"], x["code"]): x["status"] for x in cur["codes"]}
+    both = set(prev["answered"]) & set(cur["answered"])
+    scanned = set(cur.get("scanned", cur["answered"]))
+    return {
+        "since": prev["time"],
+        "new": sorted(k for k in c if k not in p),
+        "cleared": sorted(k for k in p if k not in c and k[0] in both),
+        "changed": sorted((k, p[k], c[k]) for k in c
+                          if k in p and p[k] != c[k]),
+        "lost_ecus": sorted((set(prev["answered"]) & scanned) -
+                            set(cur["answered"])),
+        "new_ecus": sorted(set(cur["answered"]) - set(prev["answered"])),
+    }

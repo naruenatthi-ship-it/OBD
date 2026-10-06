@@ -9,6 +9,8 @@ import math
 import os
 import re
 
+from . import analysis
+
 # (column, title, unit); the first column found in a file is used
 CHARTS = [
     (("soc",), "SOC", "%"),
@@ -89,7 +91,7 @@ def tick_label(v):
     return ("%.3f" % v).rstrip("0").rstrip(".") if v % 1 else "%d" % v
 
 
-def svg_chart(all_series, unit):
+def svg_chart(all_series, unit, xlabel="นาที"):
     """all_series: [(label, color, [(x, y)])]"""
     pts = [p for _, _, s in all_series for p in s]
     if not pts:
@@ -116,8 +118,8 @@ def svg_chart(all_series, unit):
     for v in xt:
         out.append('<text x="%.1f" y="%d" text-anchor="middle">%s</text>'
                    % (X(v), H - 14, tick_label(v)))
-    out.append('<text x="%d" y="%d" text-anchor="end">นาที</text>'
-               % (W - R, H - 1))
+    out.append('<text x="%d" y="%d" text-anchor="end">%s</text>'
+               % (W - R, H - 1, html.escape(xlabel)))
     out.append('<text x="4" y="%d">%s</text>' % (T + 4, html.escape(unit)))
     for label, color, s in all_series:
         if not s:
@@ -153,6 +155,8 @@ def summary_rows(runs, capacity):
         power = series(run, "pack_power_kw")
         minutes = max((r["_min"] or 0) for r in run["rows"]) \
             if run["rows"] else 0
+        socs = {r["_min"]: num(r.get("soc")) for r in run["rows"]}
+        drop = analysis.power_drop([(socs.get(t), p) for t, p in power])
         rows.append([
             run["label"], run["start"], "%.0f" % minutes,
             "%s → %s" % (tick_label(soc[0][1]), tick_label(soc[-1][1]))
@@ -163,6 +167,7 @@ def summary_rows(runs, capacity):
             if power else "-",
             "%.0f" % max(t for _, t in temp) if temp else "-",
             "%.1f → %.1f" % (delta[0][1], delta[-1][1]) if delta else "-",
+            "⚠️ ลดลง %.0f%%" % (drop * 100) if drop >= 0.2 else "-",
         ])
     return rows
 
@@ -208,11 +213,13 @@ th { color:var(--muted); font-weight:500; }
 <div class="legend">%(legend)s</div>
 <section class="card"><h2>สรุปแต่ละรอบ</h2><div class="table"><table>
 <tr><th>รอบ</th><th>เริ่ม</th><th>นาที</th><th>SOC</th><th>พลังงานเข้า (ประมาณ จาก SOC)</th>
-<th>กำลังเฉลี่ย kW</th><th>แบตร้อนสุด °C</th><th>ส่วนต่างเซลล์ mV (เริ่ม→จบ)</th></tr>
+<th>กำลังเฉลี่ย kW</th><th>แบตร้อนสุด °C</th><th>ส่วนต่างเซลล์ mV (เริ่ม→จบ)</th>
+<th>กำลังลดลงกลางทาง (SOC &lt; 95%%)</th></tr>
 %(summary)s</table></div></section>
 <div class="grid">%(charts)s</div>
 <p class="muted">กำลังและกระแสคำนวณจากค่าที่อ่านจาก BMS ทิศทาง +/- ของกระแสยังไม่ยืนยัน
-พลังงานเข้าประมาณจาก SOC × ความจุแบต</p>
+พลังงานเข้าประมาณจาก SOC × ความจุแบต "กำลังลดลงกลางทาง" คือกำลังที่ตกจากจุดสูงสุดเกิน 20%%
+ก่อนแบตใกล้เต็ม ถ้าเป็นการชาร์จ AC อาจเป็นสัญญาณว่า OBC ลดกำลังเพราะร้อน</p>
 </main></body></html>
 """
 
@@ -242,6 +249,102 @@ def write_report(paths, out, capacity=56.1):
         "now": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "cap": capacity, "legend": legend, "summary": summary,
         "charts": "".join(charts)}
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(page)
+    return out
+
+
+TRENDS = [
+    ("soh", "SOH", "%"),
+    ("delta_mv", "ส่วนต่างแรงดันเซลล์ (แยกตามช่วง SOC)", "mV"),
+    ("aux_12v", "แบต 12V ตอนตรวจ", "V"),
+    ("batt_temp_max", "อุณหภูมิแบตสูงสุด", "°C"),
+    ("temp_delta_c", "อุณหภูมิในแพ็กต่างกัน", "°C"),
+    ("dtc_active", "จำนวนโค้ดปัญหาที่ใช้งานอยู่", "โค้ด"),
+    ("ir_mohm", "IR แพ็ก (จาก health --ir)", "mΩ"),
+]
+ZONE_LABEL = {"top": "SOC ≥ 95%", "low": "SOC ≤ 25%", "mid": "SOC กลาง",
+              "unknown": "ไม่ทราบ SOC"}
+
+
+def _read_rows(path):
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return []
+    for r in rows:
+        try:
+            r["_t"] = datetime.datetime.fromisoformat(r["time"])
+        except (KeyError, ValueError):
+            r["_t"] = None
+    return [r for r in rows if r["_t"] is not None]
+
+
+def write_trends(checkup_path, health_path, out):
+    """Charts over days from checkup_history.csv and health_history.csv."""
+    checkups = _read_rows(checkup_path)
+    health = _read_rows(health_path)
+    all_rows = checkups + health
+    if not all_rows:
+        raise SystemExit("ยังไม่มีประวัติใน %s หรือ %s ให้ทำกราฟ"
+                         % (checkup_path, health_path))
+    t0 = min(r["_t"] for r in all_rows)
+
+    def pts(rows, key, zone=None):
+        return [((r["_t"] - t0).total_seconds() / 86400, num(r.get(key)))
+                for r in rows if num(r.get(key)) is not None and
+                (zone is None or r.get("zone") == zone)]
+
+    charts = []
+    for key, title, unit in TRENDS:
+        lines = []
+        if key == "delta_mv":
+            for i, zone in enumerate(("top", "low", "mid")):
+                s = pts(checkups, key, zone) + pts(health, key, zone)
+                lines.append((ZONE_LABEL[zone], COLORS[i], sorted(s)))
+        else:
+            lines.append(("checkup", COLORS[0], pts(checkups, key)))
+            lines.append(("health", COLORS[1], pts(health, key)))
+        lines = [ln for ln in lines if ln[2]]
+        svg = svg_chart(lines, unit, "วัน")
+        if svg:
+            legend = "".join('<span style="--c:%s">%s</span>' % (c, html.escape(n))
+                             for n, c, _ in lines)
+            charts.append('<section class="card"><h2>%s</h2>'
+                          '<div class="legend">%s</div>%s</section>'
+                          % (html.escape(title), legend, svg))
+    rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+        "<td>%s</td><td>%s</td></tr>" % tuple(html.escape(str(x)) for x in (
+            r["time"].replace("T", " "), r.get("level", ""),
+            ZONE_LABEL.get(r.get("zone"), r.get("zone", "")),
+            r.get("soh", ""), r.get("delta_mv", ""), r.get("aux_12v", ""),
+            r.get("dtc_active", "")))
+        for r in reversed(checkups[-10:]))
+    page = PAGE % {
+        "now": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "cap": "-", "legend": "",
+        "summary": "",
+        "charts": "".join(charts)}
+    page = page.replace("<title>Deepal S05 Charge Report</title>",
+                        "<title>Deepal S05 Trends</title>")
+    page = page.replace("<h1>รายงานการชาร์จ Deepal S05</h1>",
+                        "<h1>แนวโน้มสุขภาพรถ Deepal S05</h1>")
+    page = page.replace(" · ความจุแบตที่ใช้คำนวณ - kWh", "")
+    start = page.index('<section class="card"><h2>สรุปแต่ละรอบ</h2>')
+    end = page.index("</section>", start) + len("</section>")
+    table = ('<section class="card"><h2>ผลตรวจล่าสุด (checkup)</h2>'
+             '<div class="table"><table><tr><th>เวลา</th><th>ผลรวม</th>'
+             '<th>ช่วง SOC</th><th>SOH %%</th><th>ส่วนต่างเซลล์ mV</th>'
+             '<th>แบต 12V</th><th>โค้ด</th></tr>%s</table></div></section>'
+             % rows) if checkups else ""
+    page = page[:start] + page[end:]
+    tail_start = page.index('<p class="muted">กำลังและกระแส')
+    tail_end = page.index("</p>", tail_start) + 4
+    page = page[:tail_start] + table.replace("%%", "%") + (
+        '<p class="muted">ดูการเปลี่ยนแปลงเทียบกับตัวเองในอดีต'
+        ' ส่วนต่างเซลล์ให้เทียบเฉพาะช่วง SOC เดียวกัน</p>') + page[tail_end:]
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)
     return out

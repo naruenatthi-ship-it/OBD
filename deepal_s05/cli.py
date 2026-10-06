@@ -7,7 +7,7 @@ import json
 import sys
 import time
 
-from . import analysis, config, dtc, pids, snapshot
+from . import alerts, analysis, config, dtc, pids, snapshot
 from .elm327 import (
     Elm327, ElmError, NegativeResponse, NoData, response_header)
 
@@ -151,6 +151,21 @@ def live_signals(args):
     return [pids.SIGNALS_BY_KEY[k] for k in pids.LIVE_KEYS] + args.custom
 
 
+def check_alerts(args, values, extra=()):
+    """Evaluate the warning rules, print them and push notifications."""
+    values = dict(values, delta_mv=delta_mv(values))
+    found = alerts.evaluate(values, args.alert_rules) + list(extra)
+    for a in found:
+        print("    " + a.text())
+    if args.notifier and found:
+        sent = args.notifier.notify(found)
+        if sent:
+            print("    (ส่งแจ้งเตือนเข้ามือถือแล้ว %d รายการ)" % len(sent))
+        elif args.notifier.error:
+            print("    (ส่งแจ้งเตือนไม่สำเร็จ: %s)" % args.notifier.error)
+    return found
+
+
 def cmd_live(args):
     signals = live_signals(args)
     with connect(args) as elm:
@@ -161,6 +176,7 @@ def cmd_live(args):
             while args.count == 0 or count < args.count:
                 snap = snapshot.take(elm, signals, args.arrays, args.capacity)
                 print(status_line(snap.values, args.custom))
+                check_alerts(args, snap.values)
                 if log:
                     log.write(snap)
                 count += 1
@@ -181,9 +197,14 @@ def cmd_charge(args):
         datetime.datetime.now().strftime("%Y%m%d_%H%M"),
         "_" + label if label else "")
     history = []
+    power = []
+    expected_kw = args.amps * args.grid_v * 0.9 / 1000 if args.amps else None
     with connect(args) as elm, snapshot.CsvLog(path, label) as log:
         print("บันทึกทุก %g วินาทีลงไฟล์ %s  กด Ctrl+C เพื่อหยุด" % (
             args.interval, path))
+        if expected_kw:
+            print("ชาร์จ AC %g A ที่ %g V: กำลังเข้าแบตควรประมาณ %.1f kW" % (
+                args.amps, args.grid_v, expected_kw))
         if args.until_balanced:
             print("จะหยุดเองเมื่อแบตเต็มและส่วนต่างแรงดันเซลล์นิ่ง"
                   " (เปลี่ยนไม่เกิน %g mV ใน %g นาที)" % (
@@ -198,8 +219,21 @@ def cmd_charge(args):
                                 delta_mv(snap.values)))
                 state, text = analysis.balance_status(
                     history, args.window * 60, args.stable_mv)
+                power.append((snap.values.get("soc"),
+                              snap.values.get("pack_power_kw")))
+                p_state, p_text = analysis.charge_power_status(
+                    power, expected_kw)
                 print(status_line(snap.values, args.custom))
                 print("    " + text)
+                extra = []
+                if p_state in ("low", "drop"):
+                    extra.append(alerts.Alert(
+                        alerts.WARN, "charge_power", "กำลังชาร์จ",
+                        abs(snap.values.get("pack_power_kw") or 0), "kW",
+                        p_text))
+                elif p_text and not args.until_balanced:
+                    print("    " + p_text)
+                check_alerts(args, snap.values, extra)
                 if args.until_balanced and state == "stable":
                     print("\nบาลานซ์นิ่งแล้ว หยุดบันทึก")
                     break
@@ -400,46 +434,86 @@ def header_list(args):
                                       int(args.end, 16) + 1)]
 
 
+def scan_dtcs(elm, headers, show_all=False, quiet=False):
+    """Read trouble codes from each header. Returns (answered headers,
+    records with a "header" key: active ones unless show_all)."""
+    answered, found = [], []
+    say = (lambda *a: None) if quiet else print
+    try:
+        for header in headers:
+            if len(headers) > 16 and int(header, 16) % 16 == 0:
+                print("  ...%s" % header, file=sys.stderr)
+            try:
+                try:
+                    msg = elm.read_dtcs(header, 0xFF)
+                except NegativeResponse as e:
+                    if e.nrc != 0x31:
+                        raise
+                    msg = elm.read_dtcs(header, 0x09)
+            except NegativeResponse as e:
+                answered.append(header)
+                say("ECU %s: ไม่ให้อ่านโค้ด (%s)" % (header, e))
+                continue
+            except NoData:
+                continue
+            answered.append(header)
+            records = dtc.parse_response(msg)
+            shown = records if show_all else \
+                [r for r in records if r["active"]]
+            say("ECU %s -> %s: %s" % (
+                header, response_header(header),
+                "%d โค้ด" % len(shown) if shown else "ไม่มีโค้ด"))
+            for r in shown:
+                say("    %-10s %-40s %s" % (
+                    r["code"], r["status_text"], r["description"]))
+                found.append(dict(r, header=header))
+    except KeyboardInterrupt:
+        print("\nหยุดแล้ว")
+    return answered, found
+
+
+def print_dtc_diff(d):
+    if d is None:
+        print("ยังไม่มีผลสแกนครั้งก่อนให้เทียบ (ครั้งต่อไปจะเทียบให้)")
+        return
+    print("เทียบกับการสแกนครั้งก่อน (%s):" % d["since"])
+    if not any(d[k] for k in ("new", "cleared", "changed", "lost_ecus",
+                              "new_ecus")):
+        print("    ไม่มีอะไรเปลี่ยน")
+    for header, code in d["new"]:
+        print("    ⚠️ โค้ดใหม่ %s ที่ ECU %s" % (code, header))
+    for (header, code), old, new in d["changed"]:
+        print("    ⚠️ %s ที่ ECU %s เปลี่ยนสถานะ: %s -> %s" % (
+            code, header, dtc.status_text(old), dtc.status_text(new)))
+    for header, code in d["cleared"]:
+        print("    ✅ โค้ด %s ที่ ECU %s หายไปแล้ว" % (code, header))
+    for header in d["lost_ecus"]:
+        print("    ⚠️ ECU %s เคยตอบ แต่ครั้งนี้ไม่ตอบ" % header)
+    for header in d["new_ecus"]:
+        print("    ℹ️ ECU %s ตอบเป็นครั้งแรก" % header)
+
+
+def now_text():
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
 def cmd_dtc(args):
     headers = header_list(args)
-    found = []
-    answered = 0
     with connect(args) as elm:
         print("\nอ่านโค้ดปัญหาจาก %d header (อ่านอย่างเดียว ไม่ลบโค้ด)"
               " กด Ctrl+C เพื่อหยุด\n" % len(headers))
-        try:
-            for header in headers:
-                if len(headers) > 16 and int(header, 16) % 16 == 0:
-                    print("  ...%s" % header, file=sys.stderr)
-                try:
-                    try:
-                        msg = elm.read_dtcs(header, 0xFF)
-                    except NegativeResponse as e:
-                        if e.nrc != 0x31:
-                            raise
-                        msg = elm.read_dtcs(header, 0x09)
-                except NegativeResponse as e:
-                    answered += 1
-                    print("ECU %s: ไม่ให้อ่านโค้ด (%s)" % (header, e))
-                    continue
-                except NoData:
-                    continue
-                answered += 1
-                records = dtc.parse_response(msg)
-                shown = records if args.all else \
-                    [r for r in records if r["active"]]
-                print("ECU %s -> %s: %s" % (
-                    header, response_header(header),
-                    "%d โค้ด" % len(shown) if shown else "ไม่มีโค้ด"))
-                for r in shown:
-                    print("    %-10s %-40s %s" % (
-                        r["code"], r["status_text"], r["description"]))
-                    found.append(dict(r, header=header))
-        except KeyboardInterrupt:
-            print("\nหยุดแล้ว")
-    print("\nECU ที่ตอบ %d กล่อง  พบโค้ด %d รายการ" % (answered, len(found)))
+        answered, found = scan_dtcs(elm, headers, args.all)
+    print("\nECU ที่ตอบ %d กล่อง  พบโค้ด %d รายการ" % (len(answered),
+                                                     len(found)))
     if any(r["description"] == dtc.MANUFACTURER_SPECIFIC for r in found):
         print("โค้ดเฉพาะผู้ผลิตไม่มีคำอธิบายเปิดเผย ให้จดรหัสไปถามช่างหรือค้นต่อ")
+    if args.history:
+        active = [r for r in found if r["active"]]
+        scan = dtc.make_scan(answered, active, now_text(), headers)
+        history = dtc.load_history(args.history)
+        print()
+        print_dtc_diff(dtc.diff(history[-1] if history else None, scan))
+        dtc.save_scan(args.history, scan)
     if args.save:
         with open(args.save, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, ["header", "code", "status",
@@ -449,6 +523,177 @@ def cmd_dtc(args):
             w.writerows(dict(r, status="0x%02X" % r["status"])
                         for r in found)
         print("บันทึกไว้ที่ %s" % args.save)
+    return 0
+
+
+CHECKUP_FIELDS = ["time", "level", "zone", "soc", "soh", "delta_mv",
+                  "batt_temp_max", "batt_temp_min", "temp_delta_c",
+                  "aux_12v", "charge_temp", "dtc_active", "dtc_new",
+                  "ecus"]
+
+
+def soc_zone(soc):
+    if soc is None:
+        return "unknown"
+    return "top" if soc >= 95 else "low" if soc <= 25 else "mid"
+
+
+def read_last_row(path):
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return None, []
+    return (rows[-1] if rows else None), rows
+
+
+def num_or_none(text):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def compare_checkups(values, zone, prev, prev_rows):
+    """Findings from comparing this checkup with earlier ones:
+    [(level, text)]."""
+    out = []
+    if not prev:
+        return out
+    soh, psoh = values.get("soh"), num_or_none(prev.get("soh"))
+    if soh is not None and psoh is not None and psoh - soh >= 2:
+        out.append((alerts.WARN, "SOH ลดลงจาก %.1f%% เป็น %.1f%% ตั้งแต่ %s" % (
+            psoh, soh, prev["time"][:10])))
+    same = [r for r in prev_rows if r.get("zone") == zone and
+            num_or_none(r.get("delta_mv")) is not None]
+    d = values.get("delta_mv")
+    if same and d is not None and zone in ("top", "low"):
+        pd = num_or_none(same[-1]["delta_mv"])
+        if d - pd >= 10 and d >= pd * 1.5:
+            out.append((alerts.WARN, "ส่วนต่างเซลล์ช่วง SOC เดียวกันกว้างขึ้นจาก"
+                        " %.0f เป็น %.0f mV (%s)" % (
+                            pd, d, same[-1]["time"][:10])))
+    v12, pv12 = values.get("aux_12v"), num_or_none(prev.get("aux_12v"))
+    if v12 is not None and pv12 is not None and pv12 - v12 >= 0.3:
+        out.append((alerts.INFO, "แรงดัน 12V ตอนตรวจต่ำกว่าครั้งก่อน %.2f V"
+                    " (%.2f -> %.2f V)" % (pv12 - v12, pv12, v12)))
+    t, pt = values.get("temp_delta_c"), num_or_none(prev.get("temp_delta_c"))
+    if t is not None and pt is not None and t - pt >= 3:
+        out.append((alerts.INFO, "อุณหภูมิในแพ็กต่างกันมากขึ้น (%.0f -> %.0f °C)"
+                    % (pt, t)))
+    return out
+
+
+def cmd_checkup(args):
+    signals = live_signals(args)
+    headers = header_list(args)
+    with connect(args) as elm:
+        print("\nตรวจรถ: อ่านค่าแบต %d รอบ แล้วสแกนโค้ดปัญหา %d header"
+              " (ประมาณ 2-5 นาที อ่านอย่างเดียว)" % (args.samples,
+                                                    len(headers)))
+        snaps = []
+        for i in range(args.samples):
+            snaps.append(snapshot.take(elm, signals, args.arrays,
+                                       args.capacity))
+            if i < args.samples - 1:
+                time.sleep(1)
+        answered, records = scan_dtcs(elm, headers, quiet=True)
+
+    keys = set().union(*(sn.values for sn in snaps))
+    values = {}
+    for k in keys:
+        nums = [sn.values.get(k) for sn in snaps
+                if isinstance(sn.values.get(k), (int, float))]
+        if nums:
+            values[k] = median(nums)
+    values["delta_mv"] = delta_mv(values)
+    zone = soc_zone(values.get("soc"))
+    active = [r for r in records if r["active"]]
+
+    findings = [(a.level, a.message) for a in
+                alerts.evaluate(values, args.alert_rules)]
+    for r in active:
+        serious = r["status"] & (dtc.CONFIRMED | dtc.WARNING_LAMP)
+        findings.append((alerts.CRIT if r["status"] & dtc.WARNING_LAMP
+                         else alerts.WARN if serious else alerts.INFO,
+                         "โค้ด %s ที่ ECU %s: %s %s" % (
+                             r["code"], r["header"], r["status_text"],
+                             r["description"])))
+    scan = dtc.make_scan(answered, active, now_text(), headers)
+    history = dtc.load_history(args.dtc_history)
+    d = dtc.diff(history[-1] if history else None, scan)
+    if d:
+        for header, code in d["new"]:
+            findings.append((alerts.WARN, "โค้ดใหม่ตั้งแต่ครั้งก่อน: %s ที่ ECU %s"
+                             % (code, header)))
+        for header in d["lost_ecus"]:
+            findings.append((alerts.WARN, "ECU %s เคยตอบ แต่ครั้งนี้ไม่ตอบ"
+                             % header))
+    prev, prev_rows = read_last_row(args.history)
+    findings += compare_checkups(values, zone, prev, prev_rows)
+    if values.get("soc") is None:
+        findings.append((alerts.WARN, "อ่านค่าแบตจาก BMS ไม่ได้ รถอาจยังไม่ READY"))
+    findings.sort(key=lambda f: -f[0])
+    level = max([f[0] for f in findings] + [alerts.OK])
+
+    print("\n===== ผลตรวจรถ %s =====" % now_text().replace("T", " "))
+    print("ผลรวม: %s %s\n" % (alerts.LEVEL_ICON[level],
+                              alerts.LEVEL_TEXT[level]))
+    print("SOC %s%%  SOH %s%%  ส่วนต่างเซลล์ %s mV  แบต %s-%s °C"
+          "  หัวชาร์จ %s °C  แบต 12V %s V" % (
+              fmt(values.get("soc")), fmt(values.get("soh")),
+              fmt(values.get("delta_mv")), fmt(values.get("batt_temp_min")),
+              fmt(values.get("batt_temp_max")), fmt(values.get("charge_temp")),
+              fmt(values.get("aux_12v"))))
+    for sig in args.custom:
+        print("%s %s %s" % (sig.label, fmt(values.get(sig.key)), sig.unit))
+    print("ECU ที่ตอบ %d กล่อง  โค้ดปัญหาที่ใช้งานอยู่ %d รายการ" % (
+        len(answered), len(active)))
+    if zone == "mid":
+        print("(SOC ช่วงกลาง: ส่วนต่างเซลล์ของ LFP ใช้ตัดสินไม่ได้"
+              " ตรวจตอน SOC >= 95% หรือ <= 25% จะดูได้ดีกว่า)")
+    print()
+    if findings:
+        for lvl, text in findings:
+            print("%s %s" % (alerts.LEVEL_ICON[lvl], text))
+    else:
+        print("✅ ไม่พบสิ่งผิดปกติ")
+    if prev:
+        print("\nเทียบกับการตรวจครั้งก่อน %s" % prev["time"].replace("T", " "))
+
+    row = {k: values.get(k) for k in CHECKUP_FIELDS}
+    row.update(time=now_text(), level=alerts.LEVEL_TEXT[level], zone=zone,
+               dtc_active=len(active), dtc_new=len(d["new"]) if d else "",
+               ecus=len(answered))
+    row.update({sig.key: values.get(sig.key) for sig in args.custom})
+    header = None
+    try:
+        with open(args.history, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), None)
+    except OSError:
+        pass
+    with open(args.history, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, header or list(row), extrasaction="ignore")
+        if not header:
+            w.writeheader()
+        w.writerow({k: round(v, 3) if isinstance(v, float) else
+                    ("" if v is None else v) for k, v in row.items()})
+    dtc.save_scan(args.dtc_history, scan)
+    print("\nเก็บผลไว้ใน %s และ %s" % (args.history, args.dtc_history))
+    print("ดูแนวโน้ม: python -m deepal_s05 trends")
+
+    if args.notifier and level >= alerts.WARN:
+        problems = [alerts.Alert(lvl, "checkup%d" % i, "", 0, "", text)
+                    for i, (lvl, text) in enumerate(findings)
+                    if lvl >= alerts.WARN]
+        args.notifier.notify(problems, title="Deepal S05 checkup")
+    return 0
+
+
+def cmd_trends(args):
+    from . import report
+    out = report.write_trends(args.history, args.health, args.out)
+    print("สร้างกราฟแนวโน้มแล้ว: %s (เปิดด้วยเบราว์เซอร์)" % out)
     return 0
 
 
@@ -513,7 +758,8 @@ def cmd_dashboard(args):
     with connect(args) as elm:
         dashboard.serve(elm, live_signals(args), args.arrays, args.capacity,
                         host=args.host, port=args.http_port,
-                        interval=args.interval, csv_path=args.csv)
+                        interval=args.interval, csv_path=args.csv,
+                        rules=args.alert_rules, notifier=args.notifier)
     return 0
 
 
@@ -710,6 +956,9 @@ def build_parser():
                    help="วินาทีที่รอคำตอบแต่ละคำสั่ง")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="แสดงคำสั่งและคำตอบดิบจากกล่อง")
+    p.add_argument("--ntfy", metavar="TOPIC",
+                   help="ส่งแจ้งเตือนเข้ามือถือผ่านแอป ntfy (ตั้งชื่อ topic ให้เดายาก)")
+    p.add_argument("--ntfy-server", default="https://ntfy.sh")
     p.add_argument("--signals",
                    help="ไฟล์ JSON ค่าที่เพิ่มเอง (เช่น อุณหภูมิ OBC, แรงดันรายเซลล์)"
                         " ดูตัวอย่างใน examples/")
@@ -770,6 +1019,10 @@ def build_parser():
 
     ch = sub.add_parser("charge", help="บันทึกข้อมูลระหว่างชาร์จ")
     charge_options(ch, 30, False)
+    ch.add_argument("--amps", type=float,
+                    help="กระแสที่ตั้งไว้ที่ตู้ชาร์จ AC ใช้ตรวจว่า OBC ลดกำลังไหม")
+    ch.add_argument("--grid-v", type=float, default=230,
+                    help="แรงดันไฟบ้าน (ค่าเริ่มต้น 230)")
     ch.add_argument("--until-balanced", action="store_true",
                     help="หยุดเองเมื่อแบตเต็มและส่วนต่างเซลล์นิ่ง")
     ch.set_defaults(func=cmd_charge)
@@ -777,6 +1030,7 @@ def build_parser():
     b = sub.add_parser("balance",
                        help="เฝ้าดูการบาลานซ์ตอนชาร์จเต็มแล้วเสียบทิ้งไว้")
     charge_options(b, 60, True)
+    b.set_defaults(amps=None, grid_v=230)
     b.set_defaults(func=cmd_balance)
 
     h = sub.add_parser("health", help="ตรวจสุขภาพแบตและเก็บประวัติ")
@@ -803,7 +1057,26 @@ def build_parser():
     t.add_argument("--all", action="store_true",
                    help="แสดงทุกโค้ดที่ ECU ส่งมา รวมที่ไม่มีสถานะใช้งาน")
     t.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
+    t.add_argument("--history", default="dtc_history.json",
+                   help="ไฟล์เก็บผลสแกนไว้เทียบครั้งต่อไป (ใส่ \"\" เพื่อไม่เก็บ)")
     t.set_defaults(func=cmd_dtc)
+
+    k = sub.add_parser("checkup",
+                       help="ตรวจรถรายสัปดาห์ เทียบกับครั้งก่อน (ทำตอนรถ READY จอดอยู่)")
+    k.add_argument("--samples", type=int, default=3)
+    k.add_argument("--headers", help="สแกนโค้ดเฉพาะ header เหล่านี้ เช่น 7A1,761")
+    k.add_argument("--start", default="700")
+    k.add_argument("--end", default="7FF")
+    k.add_argument("--history", default="checkup_history.csv")
+    k.add_argument("--dtc-history", default="dtc_history.json")
+    k.set_defaults(func=cmd_checkup)
+
+    n = sub.add_parser("trends",
+                       help="กราฟแนวโน้มจากประวัติ checkup/health (ไม่ต้องใส่ --port)")
+    n.add_argument("--history", default="checkup_history.csv")
+    n.add_argument("--health", default="health_history.csv")
+    n.add_argument("-o", "--out", default="trends.html")
+    n.set_defaults(func=cmd_trends)
 
     x = sub.add_parser("aux12v",
                        help="เฝ้าแรงดันแบต 12V โดยไม่ส่งข้อความเข้ารถ")
@@ -835,12 +1108,17 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.func not in (cmd_analyze, cmd_report) and not args.port:
+    if args.func not in (cmd_analyze, cmd_report, cmd_trends) and \
+            not args.port:
         parser.error("ต้องใส่ --port")
     try:
         args.custom, args.arrays = config.load(args.signals)
+        args.alert_rules = alerts.merge_rules(
+            alerts.DEFAULT_RULES, config.load_alerts(args.signals))
     except config.ConfigError as e:
         parser.error(str(e))
+    args.notifier = alerts.Notifier(alerts.ntfy_sender(
+        args.ntfy_server, args.ntfy)) if args.ntfy else None
     try:
         return args.func(args)
     except ElmError as e:
