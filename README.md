@@ -45,6 +45,15 @@
   <img src="docs/images/report.png" width="45%" alt="รายงานการชาร์จ">
 </p>
 
+## รถที่รองรับ
+
+| รถ | ตัวเลือก | ข้อมูลจาก | สถานะ |
+|---|---|---|---|
+| **Deepal S05** (Max 56.1 kWh, 68.82 kWh) | ค่าเริ่มต้น | [jpires71/Deepal_S05_PIDs](https://github.com/jpires71/Deepal_S05_PIDs) | 🟡 เบต้า ยังไม่ได้ลองกับรถไทย |
+| **Honda CR-V e:HEV** (เจน 6, 2023+) | `--car crv-hybrid` | [OBDb/Honda-CR-V-Hybrid](https://github.com/OBDb/Honda-CR-V-Hybrid) | 🟡 เบต้า ยังไม่ได้ลองกับรถไทย · [วิธีใช้](docs/CRV.md) |
+
+CR-V อ่านแรงดันรายเซลล์ได้ครบ 72 เซลล์ พร้อมอุณหภูมิโมดูลแบต, DC-DC, พัดลมแบต, ลมยาง และค่าเครื่องยนต์
+
 ## อุปกรณ์ที่ต้องใช้
 
 | อุปกรณ์ | หมายเหตุ |
@@ -126,16 +135,19 @@ ECU แบตเตอรี่ (BMS) header `7A1` → ตอบที่ `7A9`,
 - [ ] อุณหภูมิมอเตอร์, IPU, OBC และน้ำหล่อเย็น
 - [ ] ค่าความต้านทานฉนวนระบบไฟแรงสูง
 - [ ] ตั้งเกณฑ์แจ้งเตือนจากข้อมูลรถจริงหลายคัน
+- [x] รองรับ Honda CR-V e:HEV (CAN 29 บิต, ข้อมูลจาก OBDb)
+- [ ] ยืนยันค่า CR-V กับรถสเปกไทย
 
 ## ขอบคุณ
 
 - [jpires71/Deepal_S05_PIDs](https://github.com/jpires71/Deepal_S05_PIDs) ผู้แกะและยืนยันค่าแบตชุดแรกของ S05
+- [OBDb](https://github.com/OBDb) ฐานข้อมูลค่าของรถหลายยี่ห้อ ใช้สำหรับ Honda CR-V e:HEV (CC BY-SA 4.0)
 - [Ircama/ELM327-emulator](https://github.com/Ircama/ELM327-emulator) ใช้เป็นตัวจำลองสำหรับทดสอบ
 
 ## ข้อจำกัดความรับผิดชอบ
 
 โปรเจกต์นี้ทำโดยผู้ใช้รถ **ไม่เกี่ยวข้องกับ Deepal, Changan หรือตัวแทนจำหน่าย**
-ชื่อและเครื่องหมายการค้าเป็นของเจ้าของ ค่าที่อ่านได้เป็นค่าที่ชุมชนแกะเอง อาจไม่ตรงกับค่าจริง
+ไม่เกี่ยวข้องกับ Honda เช่นกัน ชื่อและเครื่องหมายการค้าเป็นของเจ้าของ ค่าที่อ่านได้เป็นค่าที่ชุมชนแกะเอง อาจไม่ตรงกับค่าจริง
 ใช้เพื่อเฝ้าดูและประกอบการตัดสินใจเท่านั้น ไม่ใช่การวินิจฉัยของช่างผู้เชี่ยวชาญ การใช้งานเป็นความเสี่ยงของผู้ใช้เอง
 
 ---
@@ -149,7 +161,9 @@ balancing logs, repeatable drive tests, trouble code reading with diffs, tools f
 engineering unknown DIDs at home, and an unattended Raspberry Pi mode that never wakes a sleeping
 car. Only read-type UDS requests are ever sent. Battery DIDs come from
 [jpires71/Deepal_S05_PIDs](https://github.com/jpires71/Deepal_S05_PIDs); not yet verified on
-Thai-market cars. Docs are in Thai; issues in English are welcome.
+Thai-market cars. The **Honda CR-V e:HEV** (6th gen) is supported too with `--car crv-hybrid`,
+using signal definitions from [OBDb](https://github.com/OBDb/Honda-CR-V-Hybrid) (CC BY-SA 4.0)
+over 29-bit CAN, including all 72 cell voltages. Docs are in Thai; issues in English are welcome.
 
 ## License
 

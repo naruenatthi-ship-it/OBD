@@ -122,7 +122,7 @@ CRV_RULES = [
      "advice": "เซลล์ไม่สมดุล ให้ศูนย์ตรวจแบตไฮบริด"},
     {"key": "hv_coolant_temp", "label": "อุณหภูมิน้ำหล่อเย็นแบต",
      "unit": "°C", "warn_above": 45, "critical_above": 55,
-     "advice": "แบตไฮบริดร้อน เช็กช่องลม/แผ่นกรองอากาศแบต"},
+     "advice": "แบตไฮบริดร้อน ให้ตรวจระบบระบายความร้อนแบต"},
     {"key": "dcdc_temp", "label": "อุณหภูมิ DC-DC", "unit": "°C",
      "warn_above": 80, "critical_above": 95},
 ] + [{"key": k, "label": label, "unit": "kPa", "warn_below": 200,

@@ -104,6 +104,7 @@ sudo nano /etc/default/deepal-obd
 - แจ้งเตือนเข้ามือถือ: `OBD_OPTIONS="--ntfy deepal-s05-ตั้งชื่อให้เดายาก"`
 - ค่าที่หาเจอเพิ่ม (อุณหภูมิ OBC, แรงดันรายเซลล์): วางไฟล์ไว้ที่
   `/var/lib/deepal-obd/signals.json` แล้วเพิ่ม `--signals /var/lib/deepal-obd/signals.json`
+- ติดใน **Honda CR-V e:HEV**: ดูขั้นตอนใน [docs/CRV.md](../docs/CRV.md#ใช้กับ-raspberry-pi)
 - เสร็จแล้วกด Ctrl+O, Enter, Ctrl+X แล้ว `sudo systemctl restart deepal-obd`
 
 ## การใช้งานประจำวัน

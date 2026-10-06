@@ -31,6 +31,7 @@ OBD_PORT=rfcomm://00:00:00:00:00:00
 #   --ntfy deepal-s05-xxxxxxxx      ส่งแจ้งเตือนเข้ามือถือ
 #   --signals /var/lib/deepal-obd/signals.json   ค่าที่หาเจอเพิ่ม
 #   --capacity 56.1                 ความจุแบต
+#   --car crv-hybrid --obdb /var/lib/deepal-obd/Honda-CR-V-Hybrid.json   ติดใน CR-V e:HEV (ดู docs/CRV.md)
 OBD_OPTIONS=""
 
 # ตัวเลือกของ autopilot เช่น
