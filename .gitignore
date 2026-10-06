@@ -6,3 +6,4 @@ __pycache__/
 !examples/*.json
 *.log
 *.log.*
+!tests/fixtures/**/*.json
