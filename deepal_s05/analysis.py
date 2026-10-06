@@ -305,3 +305,105 @@ def power_drop(samples, taper_soc=95):
         if peak > 1:
             worst = max(worst, 1 - p / peak)
     return worst
+
+
+def _median(values):
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] +
+                                                 values[mid]) / 2
+
+
+def drive_metrics(samples, rest_a=10.0, min_range_a=20.0):
+    """Summarise a drive test from [(time, volts, amps)].
+
+    The sign convention of the current is unknown, so the discharge
+    direction is taken from the sample with the lowest voltage (the pack
+    sags while it delivers power). Returns None for fewer than 3 samples."""
+    if len(samples) < 3:
+        return None
+    low = min(range(len(samples)), key=lambda k: samples[k][1])
+    sign = 1 if samples[low][2] >= 0 else -1
+    dis = [(t, v, a * sign) for t, v, a in samples]
+    power = [v * a / 1000 for _, v, a in dis]
+    rest = [v for _, v, a in dis if abs(a) < rest_a]
+    rest_v = _median(rest)
+    min_v = min(v for _, v, _ in dis)
+    energy = sum((power[k] + power[k + 1]) / 2 *
+                 (dis[k + 1][0] - dis[k][0]) / 3600
+                 for k in range(len(dis) - 1))
+    ir = estimate_ir([a for _, _, a in dis], [v for _, v, _ in dis],
+                     min_range_a)
+    return {
+        "duration_s": dis[-1][0] - dis[0][0],
+        "peak_kw": max(power),
+        "peak_a": max(a for _, _, a in dis),
+        "regen_kw": -min(min(power), 0),
+        "min_v": min_v,
+        "rest_v": rest_v,
+        "sag_v": rest_v - min_v if rest_v is not None else None,
+        "energy_kwh": energy,
+        "ir_mohm": ir["r_mohm"],
+        "ir_r2": ir["r2"],
+        "n": len(samples),
+    }
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def compare_drivetests(cur, prev):
+    """Findings [(level, text)] comparing two drive test rows (dicts of
+    numbers or strings, as stored in drivetest_history.csv)."""
+    from .alerts import INFO, WARN
+    out = []
+    if not prev:
+        return out
+    c = {k: _num(v) for k, v in cur.items()}
+    p = {k: _num(v) for k, v in prev.items()}
+    soc_ok = c.get("soc_start") is None or p.get("soc_start") is None or \
+        abs(c["soc_start"] - p["soc_start"]) <= 15
+    temp_ok = c.get("batt_temp_start") is None or \
+        p.get("batt_temp_start") is None or \
+        abs(c["batt_temp_start"] - p["batt_temp_start"]) <= 8
+    if not (soc_ok and temp_ok):
+        out.append((INFO, "SOC หรืออุณหภูมิแบตตอนเริ่มต่างจากครั้งก่อนมาก"
+                    " ผลเทียบอาจคลาดเคลื่อน (ควรทดสอบที่ SOC/อุณหภูมิใกล้เคียงกัน)"))
+
+    def rel(key):
+        if c.get(key) is None or not p.get(key):
+            return None
+        return (c[key] - p[key]) / abs(p[key])
+
+    r = rel("peak_kw")
+    if r is not None and r <= -0.10:
+        out.append((WARN, "กำลังสูงสุดลดลง %.0f%% (%.0f -> %.0f kW)" % (
+            -r * 100, p["peak_kw"], c["peak_kw"])))
+    r = rel("ir_mohm")
+    if r is not None and r >= 0.15 and (c.get("ir_r2") or 0) >= 0.5:
+        out.append((WARN, "IR แพ็กสูงขึ้น %.0f%% (%.0f -> %.0f mΩ)" % (
+            r * 100, p["ir_mohm"], c["ir_mohm"])))
+    r = rel("sag_v")
+    if r is not None and r >= 0.15:
+        out.append((INFO, "แรงดันตกตอนเร่งมากขึ้น (%.1f -> %.1f V)" % (
+            p["sag_v"], c["sag_v"])))
+    r = rel("wh_per_km")
+    if r is not None and r >= 0.10:
+        out.append((INFO, "ใช้พลังงานต่อกม. มากขึ้น %.0f%% (%.0f -> %.0f Wh/km)"
+                    " (ขึ้นกับสภาพจราจร/อากาศด้วย)" % (
+                        r * 100, p["wh_per_km"], c["wh_per_km"])))
+    for key in sorted(c):
+        if not key.endswith("_rise") or c[key] is None or p.get(key) is None:
+            continue
+        if c[key] - p[key] >= 5:
+            name = key[:-5]
+            level = INFO if name.startswith("batt_temp") else WARN
+            out.append((level, "%s ร้อนขึ้นระหว่างทดสอบมากกว่าครั้งก่อน"
+                        " (+%.0f -> +%.0f °C)" % (name, p[key], c[key])))
+    return out

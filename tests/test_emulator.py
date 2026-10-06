@@ -194,3 +194,20 @@ def test_live_alert_from_signals_file(url, tmp_path, capsys):
     assert main(["--port", url, "--signals", str(path), "live",
                  "--count", "1"]) == 0
     assert "⚠️ อุณหภูมิ OBC 50 C (เกณฑ์ > 45)" in capsys.readouterr().out
+
+
+def test_drivetest_modes(url, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["--port", url, "--signals", DEMO, "drivetest",
+                 "--duration", "2", "--name", "t"]) == 0
+    assert main(["--port", url, "drivetest", "--mode", "route",
+                 "--duration", "9", "--interval", "0", "--km", "1",
+                 "--name", "r"]) == 0
+    assert main(["--port", url, "drivetest", "--duration", "2",
+                 "--name", "t"]) == 0
+    out = capsys.readouterr().out
+    assert "ผลทดสอบ t (accel)" in out and "Wh/km" in out
+    assert "เทียบกับครั้งก่อน" in out
+    header = (tmp_path / "drivetest_history.csv").read_text(
+        encoding="utf-8").splitlines()[0]
+    assert "wh_per_km" in header and "obc_temp_rise" in header

@@ -133,3 +133,44 @@ def test_trends_report(tmp_path):
     with pytest.raises(SystemExit):
         report.write_trends(str(tmp_path / "x"), str(tmp_path / "y"),
                             str(out))
+
+
+def test_drive_metrics():
+    # resting at 360 V, then a pull of 200 A with 80 mΩ sag, discharge
+    # reported as negative current by the car
+    samples = [(t, 360.0, -1.0) for t in range(3)]
+    samples += [(3 + t, 360 - 0.08 * a, -a) for t, a in
+                enumerate([50, 100, 150, 200])]
+    m = analysis.drive_metrics(samples)
+    assert m["peak_a"] == 200 and m["min_v"] == pytest.approx(344)
+    assert m["peak_kw"] == pytest.approx(344 * 200 / 1000)
+    assert m["sag_v"] == pytest.approx(16)
+    assert m["ir_mohm"] == pytest.approx(80, rel=0.01)
+    assert m["energy_kwh"] > 0
+    assert analysis.drive_metrics(samples[:2]) is None
+
+
+def test_compare_drivetests():
+    prev = {"soc_start": "80", "batt_temp_start": "30", "peak_kw": "120",
+            "ir_mohm": "80", "ir_r2": "0.9", "sag_v": "16",
+            "motor_temp_rise": "10", "batt_temp_max_rise": "2"}
+    cur = {"soc_start": 78, "batt_temp_start": 31, "peak_kw": 100.0,
+           "ir_mohm": 95.0, "ir_r2": 0.9, "sag_v": 19.0,
+           "motor_temp_rise": 18.0, "batt_temp_max_rise": 3.0}
+    found = analysis.compare_drivetests(cur, prev)
+    texts = " | ".join(t for _, t in found)
+    assert "กำลังสูงสุดลดลง 17%" in texts and "IR แพ็กสูงขึ้น 19%" in texts
+    assert "motor_temp ร้อนขึ้น" in texts
+    assert analysis.compare_drivetests(cur, None) == []
+    far = dict(cur, soc_start=30)
+    assert "ผลเทียบอาจคลาดเคลื่อน" in analysis.compare_drivetests(far, prev)[0][1]
+
+
+def test_append_row_adds_new_columns(tmp_path):
+    from deepal_s05.cli import append_row
+    path = str(tmp_path / "h.csv")
+    append_row(path, {"time": "1", "a": 1.23456})
+    append_row(path, {"time": "2", "a": 2, "b": None})
+    append_row(path, {"time": "3", "c": "x"})
+    lines = open(path, encoding="utf-8").read().splitlines()
+    assert lines == ["time,a,b,c", "1,1.235,,", "2,2,,", "3,,,x"]

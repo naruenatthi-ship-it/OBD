@@ -532,6 +532,31 @@ CHECKUP_FIELDS = ["time", "level", "zone", "soc", "soh", "delta_mv",
                   "ecus"]
 
 
+def append_row(path, row):
+    """Append a dict to a CSV file. Columns new to the file are added by
+    rewriting it, so later rows with extra fields are not cut short."""
+    clean = {k: round(v, 3) if isinstance(v, float) else
+             ("" if v is None else v) for k, v in row.items()}
+    _, rows = read_last_row(path)
+    header = []
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), []) or []
+    except OSError:
+        pass
+    missing = [k for k in clean if k not in header]
+    if header and not missing:
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, header).writerow(clean)
+        return
+    fields = header + missing
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fields, restval="")
+        w.writeheader()
+        w.writerows(rows)
+        w.writerow(clean)
+
+
 def soc_zone(soc):
     if soc is None:
         return "unknown"
@@ -666,18 +691,7 @@ def cmd_checkup(args):
                dtc_active=len(active), dtc_new=len(d["new"]) if d else "",
                ecus=len(answered))
     row.update({sig.key: values.get(sig.key) for sig in args.custom})
-    header = None
-    try:
-        with open(args.history, newline="", encoding="utf-8") as f:
-            header = next(csv.reader(f), None)
-    except OSError:
-        pass
-    with open(args.history, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, header or list(row), extrasaction="ignore")
-        if not header:
-            w.writeheader()
-        w.writerow({k: round(v, 3) if isinstance(v, float) else
-                    ("" if v is None else v) for k, v in row.items()})
+    append_row(args.history, row)
     dtc.save_scan(args.dtc_history, scan)
     print("\nเก็บผลไว้ใน %s และ %s" % (args.history, args.dtc_history))
     print("ดูแนวโน้ม: python -m deepal_s05 trends")
@@ -687,6 +701,170 @@ def cmd_checkup(args):
                     for i, (lvl, text) in enumerate(findings)
                     if lvl >= alerts.WARN]
         args.notifier.notify(problems, title="Deepal S05 checkup")
+    return 0
+
+
+def read_value(elm, sig, capacity):
+    try:
+        return sig.value(elm.read_did(sig.header, sig.did), capacity)
+    except (NoData, NegativeResponse):
+        return None
+
+
+class Tracker:
+    """Start, end and maximum of temperatures during a drive test."""
+
+    def __init__(self, keys):
+        self.keys = keys
+        self.start, self.end, self.max = {}, {}, {}
+
+    def add(self, values):
+        for k in self.keys:
+            v = values.get(k)
+            if v is None:
+                continue
+            self.start.setdefault(k, v)
+            self.end[k] = v
+            self.max[k] = max(self.max.get(k, v), v)
+
+    def fields(self):
+        out = {}
+        for k in self.start:
+            out[k + "_start"] = self.start[k]
+            out[k + "_max"] = self.max[k]
+            out[k + "_rise"] = self.max[k] - self.start[k]
+        return out
+
+
+def cmd_drivetest(args):
+    signals = live_signals(args)
+    tracker = Tracker(["batt_temp_max"] + [s.key for s in args.custom])
+    cur = pids.SIGNALS_BY_KEY["pack_current"]
+    volt = pids.SIGNALS_BY_KEY["pack_voltage"]
+    samples = []
+    log = snapshot.CsvLog(args.csv, args.name) if args.csv else None
+    print("⚠️ ให้คนอื่นขับ หรือทดสอบในที่ปลอดภัย คนขับห้ามดูจอหรือกดคอม")
+    with connect(args) as elm:
+        first = snapshot.take(elm, signals, (), args.capacity)
+        tracker.add(first.values)
+        print("เริ่มที่ SOC %s%%  แบต %s °C" % (
+            fmt(first.values.get("soc")),
+            fmt(first.values.get("batt_temp_max"))))
+        last_values = first.values
+        start = time.monotonic()
+        limit = args.duration or (60 if args.mode == "accel" else None)
+        try:
+            if args.mode == "accel":
+                print("\nบันทึก %g วินาที: จอดนิ่งสัก 3 วินาที แล้วเร่งเต็มที่"
+                      " (ทำซ้ำได้หลายครั้ง) กด Ctrl+C เมื่อเสร็จ\n" % limit)
+                i_before = read_value(elm, cur, args.capacity)
+                last_custom = time.monotonic()
+                while time.monotonic() - start < limit:
+                    v = read_value(elm, volt, args.capacity)
+                    i_after = read_value(elm, cur, args.capacity)
+                    if None not in (v, i_before, i_after):
+                        a = (i_before + i_after) / 2
+                        t = time.time()
+                        samples.append((t, v, a))
+                        if log:
+                            log.write(snapshot.Snapshot(t, {
+                                "pack_voltage": v, "pack_current": a,
+                                "pack_power_kw": v * a / 1000}))
+                        if len(samples) % 10 == 0:
+                            print("  %5.1f s  %6.1f V  %7.1f A  %6.1f kW" % (
+                                time.monotonic() - start, v, a,
+                                v * a / 1000))
+                    i_before = i_after
+                    if args.custom and time.monotonic() - last_custom > 5:
+                        tracker.add({sig.key: read_value(elm, sig,
+                                                         args.capacity)
+                                     for sig in args.custom})
+                        last_custom = time.monotonic()
+            else:
+                print("\nขับตามเส้นทางเดิม บันทึกทุก %g วินาที"
+                      " กด Ctrl+C เมื่อถึงปลายทาง\n" % args.interval)
+                while limit is None or time.monotonic() - start < limit:
+                    snap = snapshot.take(elm, signals, args.arrays,
+                                         args.capacity)
+                    vals = snap.values
+                    if vals.get("pack_voltage") is not None and \
+                            vals.get("pack_current") is not None:
+                        samples.append((snap.time, vals["pack_voltage"],
+                                        vals["pack_current"]))
+                    tracker.add(vals)
+                    last_values = vals
+                    if log:
+                        log.write(snap)
+                    print(status_line(vals, args.custom))
+                    time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nหยุดบันทึก")
+        if args.mode == "accel":
+            last_values = snapshot.take(elm, signals, (),
+                                        args.capacity).values
+            tracker.add(last_values)
+    if log:
+        log.__exit__()
+
+    m = analysis.drive_metrics(samples)
+    if m is None:
+        print("ข้อมูลน้อยเกินไป (ต้องมีอย่างน้อย 3 จุด)")
+        return 1
+    row = {"time": now_text(), "name": args.name, "mode": args.mode,
+           "soc_start": first.values.get("soc"),
+           "soc_end": last_values.get("soc"),
+           "batt_temp_start": first.values.get("batt_temp_max")}
+    row.update(m)
+    if args.km:
+        row["km"] = args.km
+        row["wh_per_km"] = m["energy_kwh"] * 1000 / args.km
+    row.update(tracker.fields())
+
+    print("\n===== ผลทดสอบ %s (%s) =====" % (args.name, args.mode))
+    print("ระยะเวลา %.0f วินาที  %d จุด  SOC %s -> %s%%" % (
+        m["duration_s"], m["n"], fmt(row["soc_start"]), fmt(row["soc_end"])))
+    print("กำลังสูงสุด %.1f kW  กระแสสูงสุด %.0f A  ชาร์จกลับสูงสุด %.1f kW" % (
+        m["peak_kw"], m["peak_a"], m["regen_kw"]))
+    print("แรงดันต่ำสุด %.1f V  แรงดันตอนพัก %s V  แรงดันตก %s V" % (
+        m["min_v"], fmt(m["rest_v"]), fmt(m["sag_v"])))
+    if m["ir_mohm"] is not None:
+        print("IR แพ็ก (ประมาณ) %.0f mΩ  R² %.2f%s" % (
+            m["ir_mohm"], m["ir_r2"],
+            "  ** R² ต่ำ ยังไม่น่าเชื่อถือ" if m["ir_r2"] < 0.5 else ""))
+    else:
+        print("IR แพ็ก: กระแสเปลี่ยนน้อยเกินไป วัดไม่ได้")
+    if args.mode == "route":
+        print("พลังงานที่ใช้ %.2f kWh%s" % (
+            m["energy_kwh"], "  (%.0f Wh/km)" % row["wh_per_km"]
+            if args.km else ""))
+    for k in tracker.start:
+        print("%s: เริ่ม %s  สูงสุด %s  เพิ่มขึ้น %s" % (
+            k, fmt(tracker.start[k]), fmt(tracker.max[k]),
+            fmt(tracker.max[k] - tracker.start[k])))
+
+    prev = None
+    _, rows = read_last_row(args.history)
+    same = [r for r in rows if r.get("name") == args.name and
+            r.get("mode") == args.mode]
+    if same:
+        prev = same[-1]
+    findings = analysis.compare_drivetests(row, prev)
+    if prev:
+        print("\nเทียบกับครั้งก่อน (%s):" % prev["time"].replace("T", " "))
+        for lvl, text in findings or [(alerts.OK, "ไม่มีอะไรเปลี่ยนอย่างมีนัยสำคัญ")]:
+            print("%s %s" % (alerts.LEVEL_ICON[lvl], text))
+    else:
+        print("\nครั้งแรกของการทดสอบชื่อนี้ ครั้งต่อไปจะเทียบให้"
+              " (ใช้ --name เดิม เส้นทาง/วิธีเร่งเดิม)")
+
+    append_row(args.history, row)
+    print("\nเก็บผลไว้ใน %s" % args.history)
+    if args.notifier:
+        problems = [alerts.Alert(lvl, "drive%d" % i, "", 0, "", text)
+                    for i, (lvl, text) in enumerate(findings)
+                    if lvl >= alerts.WARN]
+        if problems:
+            args.notifier.notify(problems, title="Deepal S05 drivetest")
     return 0
 
 
@@ -1070,6 +1248,21 @@ def build_parser():
     k.add_argument("--history", default="checkup_history.csv")
     k.add_argument("--dtc-history", default="dtc_history.json")
     k.set_defaults(func=cmd_checkup)
+
+    dt = sub.add_parser("drivetest",
+                        help="ทดสอบขับแบบเดิมซ้ำ แล้วเทียบกับครั้งก่อน")
+    dt.add_argument("--mode", choices=["accel", "route"], default="accel",
+                    help="accel = เร่งแรง (ค่าเริ่มต้น), route = ขับเส้นทางเดิม")
+    dt.add_argument("--name", default="default",
+                    help="ชื่อการทดสอบ ใช้เทียบกับครั้งก่อนชื่อเดียวกัน")
+    dt.add_argument("--duration", type=float,
+                    help="วินาที (accel ค่าเริ่มต้น 60, route จนกด Ctrl+C)")
+    dt.add_argument("--interval", type=float, default=2.0,
+                    help="วินาทีระหว่างการบันทึก (เฉพาะ route)")
+    dt.add_argument("--km", type=float, help="ระยะทางของเส้นทาง (route)")
+    dt.add_argument("--csv", help="บันทึกค่าระหว่างทดสอบลง CSV")
+    dt.add_argument("--history", default="drivetest_history.csv")
+    dt.set_defaults(func=cmd_drivetest)
 
     n = sub.add_parser("trends",
                        help="กราฟแนวโน้มจากประวัติ checkup/health (ไม่ต้องใส่ --port)")
