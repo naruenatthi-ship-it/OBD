@@ -1,33 +1,61 @@
 """ELM327-emulator scenario 'deepal_s05': a Deepal S05 BMS (7A1/7A9) with a
 56.1 kWh pack, answering the DIDs listed in deepal_s05/pids.py.
 
-The values are made up for testing, not recorded from a car.
+The values are made up for testing, not recorded from a car. So are the
+per-cell DID 22F2A0, the extended session support and the second ECU at
+761/769 (standing in for the on-board charger): they exist only to exercise
+the discover and ecus commands. The real addresses and DIDs are unknown.
 
 Use it with run_emulator.py, or from the emulator prompt (started in this
 directory): merge deepal_s05_scenario, then scenario deepal_s05.
 """
 
-from elm.obd_message import ELM_FOOTER, HD, SZ, DT, ST
+import random
+
+from elm.obd_message import ELM_FOOTER, ST, iso_tp_frames
 
 REQ = "7A1"
 RSP = "7A9"
+OBC_REQ = "761"
+OBC_RSP = "769"
 
 
-def answer(did, data):
-    """Positive single-frame answer to 22<did> carrying `data` (hex)."""
-    payload = "62 %s %s %s" % (did[:2], did[2:], data)
-    return HD(RSP) + SZ("%02X" % len(payload.split())) + DT(payload)
+def answer(did, data, rsp=RSP):
+    """Positive answer to 22<did> carrying `data` (hex), framed as ISO-TP."""
+    payload = ("62 %s %s %s" % (did[:2], did[2:], data)).split()
+    return iso_tp_frames(payload, rsp)
 
 
-def entry(descr, did, data):
-    responses = [answer(did, d) for d in data] if isinstance(data, list) \
-        else answer(did, data)
+def entry(descr, did, data, req=REQ, rsp=RSP):
+    responses = [answer(did, d, rsp) for d in data] \
+        if isinstance(data, list) else answer(did, data, rsp)
     return {
         "Request": "^22" + did + ELM_FOOTER,
         "Descr": descr,
-        "Header": REQ,
+        "Header": req,
         "Response": responses,
     }
+
+
+def ascii_hex(text):
+    return " ".join("%02X" % ord(c) for c in text)
+
+
+def fixed(descr, request, response_hex, req=REQ, rsp=RSP):
+    return {
+        "Request": "^" + request + ELM_FOOTER,
+        "Descr": descr,
+        "Header": req,
+        "Response": iso_tp_frames(response_hex.split(), rsp),
+    }
+
+
+def cell_voltages(count=108, seed=5):
+    """Made-up cell voltages around 3.330 V, cell 47 low, cell 83 high."""
+    rnd = random.Random(seed)
+    mv = [3330 + rnd.randint(-2, 2) for _ in range(count)]
+    mv[46], mv[82] = 3325, 3334
+    return " ".join("%02X %02X" % (v >> 8, v & 0xFF) for v in mv)
 
 
 ObdMessage = {
@@ -53,12 +81,19 @@ ObdMessage = {
         "E_SUM": entry("Energy (experimental)", "F264", "0F A0"),
         "SOH": entry("SOH", "F27D", "0F 0F 78"),                    # 98.7 %
         "EFC": entry("EFC (experimental)", "F27F", "31 0D C8 F8"),  # 14.67
-        # Any other DID in F2xx: requestOutOfRange, like a real ECU
-        "OTHER_F2": {
-            "Request": "^22F2[0-9A-F]{2}" + ELM_FOOTER,
-            "Descr": "Unsupported DID",
-            "Header": REQ,
-            "Response": HD(RSP) + SZ("03") + DT("7F 22 31"),
-        },
+        "CELLS": entry("Cell voltages (made up)", "F2A0", cell_voltages()),
+        "BMS_PART": entry("Part number", "F187", ascii_hex("DEMO-BMS-01")),
+        "BMS_SW": entry("Software version", "F195", ascii_hex("V1.00")),
+        "BMS_EXT": fixed("Extended session", "1003", "50 03 00 32 01 F4"),
+        "BMS_DEF": fixed("Default session", "1001", "50 01 00 32 01 F4"),
+        "BMS_TP": fixed("Tester present", "3E00", "7E 00"),
+        "OBC_PART": entry("Part number", "F187", ascii_hex("DEMO-OBC-01"),
+                          OBC_REQ, OBC_RSP),
+        "OBC_TEMP": entry("Temperature (made up)", "F2C1", "5A",
+                          OBC_REQ, OBC_RSP),
+        # Any other DID: requestOutOfRange, like a real ECU
+        "OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31"),
+        "OBC_OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31",
+                           OBC_REQ, OBC_RSP),
     }
 }

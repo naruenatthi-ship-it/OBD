@@ -1,7 +1,9 @@
 """Minimal ELM327 client for reading UDS DIDs (service 0x22) over CAN.
 
-Only read requests are exposed: the client never sends write, routine,
-reset or DTC-clear services to the vehicle.
+Only read-type requests are exposed: ReadDataByIdentifier (0x22), switching
+between the default and extended diagnostic session (0x10 01/03) and
+TesterPresent (0x3E). The client never sends write, routine, security
+access, reset or DTC-clear services to the vehicle.
 """
 
 import re
@@ -97,13 +99,19 @@ def response_header(request_header):
     return "%03X" % (int(request_header, 16) + 8)
 
 
+# Requests the client is allowed to put on the bus (hex, no spaces)
+ALLOWED_REQUESTS = re.compile(r"^(22[0-9A-F]{4}|1001|1003|3E00)$")
+
+
 class Elm327:
-    def __init__(self, port, baudrate=38400, timeout=2.0, log=None):
+    def __init__(self, port, baudrate=38400, timeout=2.0, log=None,
+                 ser=None):
         self.port_name = port
-        self.ser = open_port(port, baudrate, timeout=0.2)
+        self.ser = ser or open_port(port, baudrate, timeout=0.2)
         self.timeout = timeout
         self.log = log  # optional callable(direction, text)
         self.header = None
+        self.cra_supported = True
 
     def close(self):
         self.ser.close()
@@ -160,18 +168,25 @@ class Elm327:
         return info
 
     def set_header(self, header):
+        """Address requests to `header` and only accept its response id."""
         if header == self.header:
             return
         reply = self.command("ATSH" + header)
         if "OK" not in reply.upper():
             raise ElmError("ATSH%s failed: %r" % (header, reply))
+        if self.cra_supported:
+            reply = self.command("ATCRA" + response_header(header))
+            if "OK" not in reply.upper():
+                self.cra_supported = False
         self.header = header
 
-    def read_did(self, header, did):
-        """UDS ReadDataByIdentifier (0x22). Returns the data bytes after the
-        echoed DID."""
+    def request(self, header, payload):
+        """Send one allowed UDS request and return the response messages
+        (bytes, starting with the response SID) from the ECU."""
+        if not ALLOWED_REQUESTS.match(payload):
+            raise ValueError("request %s is not allowed" % payload)
         self.set_header(header)
-        reply = self.command("22%04X" % did)
+        reply = self.command(payload)
         upper = reply.upper()
         if upper.strip() == "?":
             raise ElmError("adapter rejected request")
@@ -182,12 +197,80 @@ class Elm327:
         frames = [f for h, f in parse_can_frames(reply) if h == rx]
         if not frames:
             raise NoData("no frames from %s in %r" % (rx, reply))
-        for msg in assemble_isotp(frames):
-            if len(msg) >= 3 and msg[0] == 0x7F and msg[1] == 0x22:
+        return assemble_isotp(frames), reply
+
+    def _positive(self, header, payload):
+        sid = int(payload[:2], 16)
+        messages, reply = self.request(header, payload)
+        for msg in messages:
+            if len(msg) >= 3 and msg[0] == 0x7F and msg[1] == sid:
                 if msg[2] == 0x78:  # response pending, real answer follows
                     continue
-                raise NegativeResponse(0x22, msg[2])
-            if len(msg) >= 3 and msg[0] == 0x62 and \
-                    (msg[1] << 8 | msg[2]) == did:
-                return msg[3:]
+                raise NegativeResponse(sid, msg[2])
+            if msg and msg[0] == sid + 0x40:
+                return msg
         raise NoData("unexpected reply %r" % reply)
+
+    def read_did(self, header, did):
+        """UDS ReadDataByIdentifier (0x22). Returns the data bytes after the
+        echoed DID."""
+        msg = self._positive(header, "22%04X" % did)
+        if len(msg) < 3 or (msg[1] << 8 | msg[2]) != did:
+            raise NoData("reply for another DID: %s" % msg.hex().upper())
+        return msg[3:]
+
+    def start_session(self, header, extended=True):
+        """DiagnosticSessionControl: extended (0x03) or default (0x01)."""
+        return self._positive(header, "1003" if extended else "1001")
+
+    def tester_present(self, header):
+        return self._positive(header, "3E00")
+
+    def setup_monitor(self, can_filter="700", can_mask="700"):
+        """Prepare a passive capture: raw frames (PCI bytes visible), no
+        acknowledgements on the bus, only ids matching filter/mask."""
+        warnings = []
+        for cmd in ("ATCRA", "ATCAF0", "ATCF" + can_filter,
+                    "ATCM" + can_mask):
+            reply = self.command(cmd)
+            if "OK" not in reply.upper():
+                raise ElmError("%s failed: %r" % (cmd, reply))
+        if "OK" not in self.command("ATCSM1").upper():
+            warnings.append("กล่องไม่รองรับ ATCSM1 (silent monitoring)")
+        self.header = None
+        return warnings
+
+    def monitor(self, on_line, duration=None):
+        """Run ATMA and call on_line(text) for every received line until
+        `duration` seconds pass or Ctrl+C. Restarts after BUFFER FULL.
+        Returns the number of buffer overflows."""
+        overflows = 0
+        start = time.monotonic()
+        self.ser.reset_input_buffer()
+        self.ser.write(b"ATMA\r")
+        buf = b""
+        try:
+            while duration is None or time.monotonic() - start < duration:
+                chunk = self.ser.read(512)
+                if not chunk:
+                    continue
+                buf += chunk
+                *lines, buf = buf.replace(b"\n", b"\r").split(b"\r")
+                for raw in lines:
+                    line = raw.decode("ascii", "replace").strip()
+                    if not line or line.upper() == "ATMA":
+                        continue
+                    if "BUFFER FULL" in line.upper():
+                        overflows += 1
+                        continue
+                    on_line(line)
+                if PROMPT in buf:  # adapter stopped monitoring by itself
+                    buf = b""
+                    self.ser.write(b"ATMA\r")
+        finally:
+            self.ser.write(b"\r")  # any character stops ATMA
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                if PROMPT in self.ser.read(256):
+                    break
+        return overflows

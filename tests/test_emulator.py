@@ -62,3 +62,21 @@ def test_cli_check(url, tmp_path, capsys):
     assert main(["--port", url, "check", "--save", str(out)]) == 0
     assert "14 จาก 14" in capsys.readouterr().out
     assert out.exists()
+
+
+def test_cli_ecus(url, capsys):
+    assert main(["--port", url, "ecus", "--start", "760", "--end",
+                 "7A2"]) == 0
+    out = capsys.readouterr().out
+    assert "761 -> 769" in out and "DEMO-OBC-01" in out
+    assert "7A1 -> 7A9" in out and "พบ 2 ECU" in out
+
+
+def test_cli_discover_finds_cells(url, tmp_path, capsys):
+    out_csv = tmp_path / "dids.csv"
+    assert main(["--port", url, "discover", "--start", "F29F", "--end",
+                 "F2A1", "--extended", "--save", str(out_csv)]) == 0
+    out = capsys.readouterr().out
+    assert "22F2A0  216" in out
+    assert "อาจเป็นแรงดันรายเซลล์: 108 ค่า" in out
+    assert "F2A0" in out_csv.read_text(encoding="utf-8")
