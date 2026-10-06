@@ -1,0 +1,4 @@
+pyserial>=3.5
+# Only needed for the emulator and tests:
+# ELM327-emulator>=4.0
+# pytest
