@@ -211,3 +211,21 @@ def test_drivetest_modes(url, tmp_path, capsys, monkeypatch):
     header = (tmp_path / "drivetest_history.csv").read_text(
         encoding="utf-8").splitlines()[0]
     assert "wh_per_km" in header and "obc_temp_rise" in header
+
+
+def test_reverse_workflow(url, tmp_path, capsys):
+    scan = tmp_path / "scan.csv"
+    assert main(["--port", url, "discover", "--header", "7A1,761",
+                 "--ranges", "F2C0-F2C1,F250-F251", "--save",
+                 str(scan)]) == 0
+    text = scan.read_text(encoding="utf-8")
+    assert "761,F2C1" in text and "7A1,F250" in text
+    assert main(["scandiff", str(scan), str(scan)]) == 0
+    assert "ไม่มีไบต์ไหนเปลี่ยน" in capsys.readouterr().out
+    rec = tmp_path / "rec.csv"
+    assert main(["--port", url, "record", "--dids-from", str(scan),
+                 "--interval", "0", "--duration", "4",
+                 "--csv", str(rec)]) == 0
+    assert "did_761_F2C1" in rec.read_text(encoding="utf-8")
+    assert main(["correlate", str(rec)]) == 0
+    assert "ไบต์ที่เปลี่ยนระหว่างบันทึก" in capsys.readouterr().out

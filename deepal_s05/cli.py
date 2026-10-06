@@ -992,25 +992,39 @@ def cmd_dashboard(args):
     return 0
 
 
-def cmd_discover(args):
-    start, end = int(args.start, 16), int(args.end, 16)
+def parse_ranges(text):
+    """"0100-01FF,F100-F2FF" -> [(0x0100, 0x01FF), (0xF100, 0xF2FF)]"""
+    out = []
+    for part in text.split(","):
+        lo, _, hi = part.strip().partition("-")
+        out.append((int(lo, 16), int(hi or lo, 16)))
+    return out
+
+
+def discover_header(elm, header, ranges, extended):
+    """Read every DID in `ranges` from one ECU: [(did, raw, cell_run)]."""
     found = []
-    with connect(args) as elm:
-        if args.extended:
-            elm.start_session(args.header, extended=True)
-            print("เข้าโหมดวินิจฉัยขยาย (10 03) ที่ %s แล้ว" % args.header)
-        last_tp = time.monotonic()
-        print("\nสแกน DID %04X-%04X ที่ header %s (อ่านอย่างเดียว)"
-              " กด Ctrl+C เพื่อหยุด\n" % (start, end, args.header))
+    if extended:
         try:
+            elm.start_session(header, extended=True)
+            print("เข้าโหมดวินิจฉัยขยาย (10 03) ที่ %s แล้ว" % header)
+        except (NoData, NegativeResponse) as e:
+            print("เข้าโหมดวินิจฉัยขยายที่ %s ไม่ได้ (%s) อ่านแบบปกติแทน"
+                  % (header, e))
+            extended = False
+    last_tp = time.monotonic()
+    try:
+        for start, end in ranges:
+            print("\nสแกน DID %04X-%04X ที่ header %s (อ่านอย่างเดียว)"
+                  " กด Ctrl+C เพื่อหยุด\n" % (start, end, header))
             for did in range(start, end + 1):
-                if args.extended and time.monotonic() - last_tp > 2:
-                    elm.tester_present(args.header)
+                if extended and time.monotonic() - last_tp > 2:
+                    elm.tester_present(header)
                     last_tp = time.monotonic()
                 if did % 64 == 0:
                     print("  ...%04X" % did, file=sys.stderr)
                 try:
-                    raw = elm.read_did(args.header, did)
+                    raw = elm.read_did(header, did)
                 except (NoData, NegativeResponse):
                     continue
                 run = analysis.find_cell_run(raw)
@@ -1018,31 +1032,155 @@ def cmd_discover(args):
                 text = raw.hex(" ").upper()
                 if len(text) > 72:
                     text = text[:72] + " ..."
-                print("22%04X  %3d ไบต์  %s" % (did, len(raw), text))
+                print("%s 22%04X  %3d ไบต์  %s" % (header, did, len(raw),
+                                                  text))
                 if run:
                     print("        ** " + analysis.describe_cell_run(run))
+    finally:
+        if extended:
+            try:
+                elm.start_session(header, extended=False)
+            except ElmError:
+                pass
+    return found
+
+
+def cmd_discover(args):
+    headers = [h.strip().upper() for h in args.header.split(",")]
+    ranges = parse_ranges(args.ranges) if args.ranges else \
+        [(int(args.start, 16), int(args.end, 16))]
+    results = []
+    with connect(args) as elm:
+        try:
+            for header in headers:
+                for did, raw, run in discover_header(elm, header, ranges,
+                                                     args.extended):
+                    results.append((header, did, raw, run))
         except KeyboardInterrupt:
             print("\nหยุดแล้ว")
-        finally:
-            if args.extended:
-                try:
-                    elm.start_session(args.header, extended=False)
-                except ElmError:
-                    pass
-    print("\nพบ %d DID" % len(found))
-    cells = [f for f in found if f[2]]
+    print("\nพบ %d DID" % len(results))
+    cells = [r for r in results if r[3]]
     if cells:
         print("DID ที่อาจเป็นแรงดันรายเซลล์: " +
-              ", ".join("22%04X" % d for d, _, _ in cells))
+              ", ".join("%s:22%04X" % (h, d) for h, d, _, _ in cells))
     if args.save:
         with open(args.save, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["header", "did", "length", "raw", "cell_like"])
-            for did, raw, run in found:
-                w.writerow([args.header, "%04X" % did, len(raw),
+            for header, did, raw, run in results:
+                w.writerow([header, "%04X" % did, len(raw),
                             raw.hex().upper(),
                             analysis.describe_cell_run(run) if run else ""])
         print("บันทึกไว้ที่ %s" % args.save)
+    return 0
+
+
+def cmd_scandiff(args):
+    from . import reverse
+    a, b = reverse.read_scan(args.before), reverse.read_scan(args.after)
+    d = reverse.diff_scans(a, b)
+    print("เทียบ %s (%d DID) กับ %s (%d DID)\n" % (
+        args.before, len(a), args.after, len(b)))
+    if not d["changed"]:
+        print("ไม่มีไบต์ไหนเปลี่ยน")
+    for (header, did), moves in d["changed"].items():
+        print("%s 22%s  เปลี่ยน %d ไบต์" % (header, did, len(moves)))
+        for pos, old, new in moves[:args.max_bytes]:
+            letter = chr(ord("A") + pos) if pos < 26 else "#%d" % pos
+            print("    ไบต์ %-3s %02X -> %02X  (%3d -> %3d, %+d)  %s" % (
+                letter, old, new, old, new, new - old,
+                reverse.temp_guess(old, new)))
+        if len(moves) > args.max_bytes:
+            print("    ... อีก %d ไบต์" % (len(moves) - args.max_bytes))
+    for key in d["length"]:
+        print("%s 22%s  ความยาวคำตอบเปลี่ยน" % key)
+    for label, keys in (("มีเฉพาะครั้งแรก", d["only_a"]),
+                        ("มีเฉพาะครั้งหลัง", d["only_b"])):
+        if keys:
+            print("%s: %s" % (label, ", ".join("%s:22%s" % k for k in keys)))
+    return 0
+
+
+def cmd_record(args):
+    from . import reverse
+    if args.dids_from:
+        keys = sorted(reverse.read_scan(args.dids_from))
+        if args.header:
+            wanted = {h.strip().upper() for h in args.header.split(",")}
+            keys = [k for k in keys if k[0] in wanted]
+    else:
+        keys = []
+        for item in (args.dids or "").split(","):
+            header, _, did = item.strip().upper().partition(":")
+            if did:
+                keys.append((header, did))
+    if not keys:
+        print("ไม่มี DID ให้บันทึก ใช้ --dids-from ไฟล์จาก discover หรือ"
+              " --dids 7A1:F2A0,761:F2C1")
+        return 1
+    signals = [pids.SIGNALS_BY_KEY[k] for k in pids.LIVE_KEYS]
+    path = args.csv
+    print("บันทึก %d DID + ค่าอ้างอิงทุกรอบ ลง %s  กด Ctrl+C เพื่อหยุด" % (
+        len(keys), path))
+    rows = 0
+    with connect(args) as elm, open(path, "w", newline="",
+                                    encoding="utf-8") as f:
+        ref_keys = [s.key for s in signals] + ["aux_12v"]
+        w = csv.writer(f)
+        w.writerow(["time", "note"] + ref_keys +
+                   ["did_%s_%s" % k for k in keys])
+        start = time.time()
+        try:
+            while not args.duration or time.time() - start < args.duration:
+                snap = snapshot.take(elm, signals, (), args.capacity)
+                raws = []
+                for header, did in keys:
+                    try:
+                        raws.append(elm.read_did(header, int(did, 16))
+                                    .hex().upper())
+                    except (NoData, NegativeResponse):
+                        raws.append("")
+                w.writerow([now_text(), args.note or ""] +
+                           [snap.values.get(k, "") for k in ref_keys] + raws)
+                f.flush()
+                rows += 1
+                print("  รอบที่ %d  SOC %s  แบต %s °C  กระแส %s A" % (
+                    rows, fmt(snap.values.get("soc")),
+                    fmt(snap.values.get("batt_temp_max")),
+                    fmt(snap.values.get("pack_current"))))
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nหยุดแล้ว")
+    print("บันทึก %d รอบไว้ที่ %s" % (rows, path))
+    return 0
+
+
+def cmd_correlate(args):
+    from . import reverse
+    rows, did_keys = reverse.read_record(args.file)
+    if args.ref:
+        found = reverse.correlate(rows, args.ref, did_keys, args.min_r,
+                                  args.top)
+        print("ไบต์ที่ขยับตาม %s (%d รอบ):\n" % (args.ref, len(rows)))
+        if not found:
+            print("ไม่เจอ (ลองลด --min-r หรือเก็บข้อมูลให้ค่าอ้างอิงเปลี่ยนมากขึ้น)")
+        for c in found:
+            header, did = c["did"][4:].split("_")
+            print("%s 22%s  ไบต์ %s แบบ %-5s r=%+.3f  สูตร %s  (คลาดเคลื่อน"
+                  " %.3g)" % (header, did, chr(ord("A") + c["pos"]),
+                              c["name"], c["r"], c["formula"], c["rmse"]))
+        return 0
+    moving = reverse.moving_bytes(rows, did_keys)
+    print("ไบต์ที่เปลี่ยนระหว่างบันทึก (%d รอบ) เรียงจากเปลี่ยนบ่อยสุด:\n"
+          % len(rows))
+    for key, pos, lo, hi, distinct in moving[:args.top]:
+        header, did = key[4:].split("_")
+        print("%s 22%s  ไบต์ %s  %3d..%3d  (%d ค่า)  %s" % (
+            header, did, chr(ord("A") + pos) if pos < 26 else pos, lo, hi,
+            distinct, reverse.temp_guess(lo, hi)))
+    print("\nเทียบกับค่าที่รู้: python -m deepal_s05 correlate %s --ref"
+          " batt_temp_max (หรือ soc, pack_current, pack_voltage, aux_12v)"
+          % args.file)
     return 0
 
 
@@ -1206,13 +1344,41 @@ def build_parser():
     l.set_defaults(func=cmd_live)
 
     d = sub.add_parser("discover", help="สแกนหา DID ที่ ECU ตอบ (อ่านอย่างเดียว)")
-    d.add_argument("--header", default=pids.BMS_HEADER)
+    d.add_argument("--header", default=pids.BMS_HEADER,
+                   help="header เดียวหรือหลายตัว เช่น 7A1,761")
     d.add_argument("--start", default="F200")
     d.add_argument("--end", default="F2FF")
+    d.add_argument("--ranges",
+                   help="หลายช่วงพร้อมกัน เช่น 0100-01FF,F100-F2FF")
     d.add_argument("--extended", action="store_true",
                    help="เข้าโหมดวินิจฉัยขยาย (10 03) ก่อนอ่าน ใช้ตอนจอดเท่านั้น")
     d.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
     d.set_defaults(func=cmd_discover)
+
+    sd = sub.add_parser("scandiff",
+                        help="เทียบผล discover 2 ครั้ง (ไม่ต้องใส่ --port)")
+    sd.add_argument("before")
+    sd.add_argument("after")
+    sd.add_argument("--max-bytes", type=int, default=12)
+    sd.set_defaults(func=cmd_scandiff)
+
+    rc = sub.add_parser("record", help="บันทึกค่าดิบของ DID ต่อเนื่อง ไว้แกะสูตร")
+    rc.add_argument("--dids-from", help="ไฟล์ CSV จาก discover")
+    rc.add_argument("--header", help="ใช้เฉพาะ header เหล่านี้จากไฟล์")
+    rc.add_argument("--dids", help="ระบุเอง เช่น 7A1:F2A0,761:F2C1")
+    rc.add_argument("--interval", type=float, default=2.0)
+    rc.add_argument("--duration", type=float, help="วินาที")
+    rc.add_argument("--note", help="หมายเหตุ เช่น ขับในเมือง")
+    rc.add_argument("--csv", default="record.csv")
+    rc.set_defaults(func=cmd_record)
+
+    co = sub.add_parser("correlate",
+                        help="หาไบต์ที่ขยับตามค่าที่รู้ (ไม่ต้องใส่ --port)")
+    co.add_argument("file", help="ไฟล์จาก record")
+    co.add_argument("--ref", help="คอลัมน์อ้างอิง เช่น batt_temp_max, soc")
+    co.add_argument("--min-r", type=float, default=0.9)
+    co.add_argument("--top", type=int, default=15)
+    co.set_defaults(func=cmd_correlate)
 
     e = sub.add_parser("ecus", help="สแกนหา ECU ทั้งหมดในรถ (อ่านอย่างเดียว)")
     e.add_argument("--start", default="700")
@@ -1369,8 +1535,8 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.func not in (cmd_analyze, cmd_report, cmd_trends) and \
-            not args.port:
+    if args.func not in (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
+                         cmd_correlate) and not args.port:
         parser.error("ต้องใส่ --port")
     try:
         args.custom, args.arrays = config.load(args.signals)

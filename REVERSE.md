@@ -1,0 +1,96 @@
+# คู่มือวันแกะข้อมูล (ทำเองที่บ้าน ไม่ต้องไปอู่)
+
+เป้าหมาย: เก็บข้อมูลดิบจากรถให้ครบในวันเดียว แล้วส่งไฟล์ให้วิเคราะห์
+หาแรงดันรายเซลล์, อุณหภูมิมอเตอร์/IPU/OBC, น้ำหล่อเย็น, ค่าฉนวน ฯลฯ
+
+ทุกคำสั่งในคู่มือนี้**อ่านอย่างเดียว** ไม่เขียนหรือสั่งงานอะไรในรถ
+ใช้เวลารวมประมาณ 1.5–2 ชั่วโมง (ส่วนใหญ่รอเฉยๆ)
+
+## ก่อนเริ่ม
+
+- ถ้าใช้ Raspberry Pi: ssh เข้า Pi (จากคอม หรือจาก iPhone ด้วยแอป **Termius** ผ่าน Hotspot)
+  แล้วหยุดโหมดอัตโนมัติก่อน เพราะกล่องรับได้ทีละโปรแกรม
+
+  ```bash
+  sudo systemctl stop deepal-obd
+  cd /var/lib/deepal-obd
+  alias obd='python3 -m deepal_s05 --port rfcomm://MAC_ของกล่อง'   # เปลี่ยน MAC
+  export PYTHONPATH=/opt/deepal-obd
+  ```
+
+  (ถ้าใช้คอม ให้แทน `obd` ด้วย `python -m deepal_s05 --port COM5`)
+- จดเวลาที่เริ่มแต่ละขั้น และ**ถ่ายรูปหน้าจอรถ**ตอนเริ่มและจบแต่ละขั้น
+  (เลขไมล์, % แบต, ระยะทางที่เหลือ, อุณหภูมิภายนอก, ลมยางถ้าจอแสดง) รูปพวกนี้ใช้เทียบค่าได้
+
+## ขั้น A: ตอนรถเย็น (เช้า หลังจอดทั้งคืน) จอดอยู่ รถ READY ประมาณ 45 นาที
+
+```bash
+obd ecus --save ecus.csv
+obd dtc --save dtc.csv
+```
+
+ดูรายการ header ใน `ecus.csv` แล้วสแกนทุกกล่อง (ใส่ header ที่เจอทั้งหมด คั่นด้วยจุลภาค):
+
+```bash
+obd discover --header 7A1,7E0,761 --ranges 0100-01FF,F100-F1FF,F200-F2FF,F300-F3FF --save scan_cold.csv
+```
+
+ต่อด้วยสแกน BMS อีกรอบในโหมดวินิจฉัยขยาย (บางค่าอ่านได้เฉพาะโหมดนี้):
+
+```bash
+obd discover --header 7A1 --ranges F100-F3FF --extended --save scan_cold_ext.csv
+```
+
+## ขั้น B: ขับ 20–30 นาที พร้อมบันทึก
+
+ให้**คนอื่นขับ** หรือวางเครื่องไว้แล้วไม่ต้องแตะ:
+
+```bash
+obd record --dids-from scan_cold.csv --note drive --csv rec_drive.csv
+```
+
+ระหว่างขับให้มีทั้ง: ออกตัวแรงๆ สัก 2–3 ครั้ง, ความเร็วคงที่บนถนนใหญ่, เบรกชาร์จกลับ (regen),
+เปิด/ปิดแอร์ ถึงที่หมายแล้วกด Ctrl+C
+
+## ขั้น C: ทันทีหลังขับ (รถยังร้อน) จอด READY
+
+สแกนซ้ำแบบเดียวกับขั้น A ค่าอุณหภูมิจะต่างจากตอนเย็นชัดเจน:
+
+```bash
+obd discover --header 7A1,7E0,761 --ranges 0100-01FF,F100-F1FF,F200-F2FF,F300-F3FF --save scan_hot.csv
+```
+
+## ขั้น D: ชาร์จ AC 15 นาที พร้อมบันทึก
+
+เสียบชาร์จ AC แล้ว:
+
+```bash
+obd ecus --save ecus_charging.csv        # บางกล่อง (เช่น OBC) ตอบเฉพาะตอนชาร์จ
+obd record --dids-from scan_cold.csv --note charge --csv rec_charge.csv --duration 900
+```
+
+ถ้า `ecus_charging.csv` มีกล่องใหม่ที่ไม่เคยเจอ ให้ `discover` กล่องนั้นเพิ่มด้วย
+
+## ส่งไฟล์
+
+`ecus.csv`, `ecus_charging.csv`, `dtc.csv`, `scan_cold.csv`, `scan_cold_ext.csv`,
+`scan_hot.csv`, `rec_drive.csv`, `rec_charge.csv` และรูปหน้าจอรถ
+
+บน Pi ดาวน์โหลดได้จาก `http://deepal-pi.local:8000/files` แล้วอย่าลืมเปิดโหมดอัตโนมัติคืน:
+
+```bash
+sudo systemctl start deepal-obd
+```
+
+## ลองดูเองก่อนก็ได้
+
+```bash
+python -m deepal_s05 scandiff scan_cold.csv scan_hot.csv     # ไบต์ที่เปลี่ยนระหว่างเย็นกับร้อน
+python -m deepal_s05 correlate rec_drive.csv                 # ไบต์ที่ขยับระหว่างขับ
+python -m deepal_s05 correlate rec_drive.csv --ref batt_temp_max   # ไบต์ที่ขยับตามอุณหภูมิแบต
+python -m deepal_s05 correlate rec_drive.csv --ref pack_current    # ไบต์ที่ขยับตามกระแส
+```
+
+`correlate --ref` จะเสนอสูตรในรูปแบบที่ใส่ในไฟล์ `--signals` ได้ทันที
+แต่ระวัง: ค่าที่ขึ้นลงพร้อมกัน (เช่น อุณหภูมิหลายจุดที่ร้อนขึ้นพร้อมกัน) จะแยกกันยาก
+ต้องดูหลายไฟล์ประกอบกันก่อนสรุป
