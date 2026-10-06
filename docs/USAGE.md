@@ -362,7 +362,7 @@ python -m deepal_s05 analyze sniff.log
 ## ทดสอบบนคอมโดยไม่ต้องมีรถ (ELM327-emulator)
 
 ```bash
-pip install ELM327-emulator
+pip install "ELM327-emulator @ git+https://github.com/Ircama/ELM327-emulator@v4.0.0"
 python emulator/run_emulator.py            # เปิดตัวจำลองที่ TCP port 35000
 python -m deepal_s05 --port socket://localhost:35000 check   # รันในอีกหน้าต่าง
 python -m deepal_s05 --port socket://localhost:35000 --signals examples/signals_demo.json dashboard
@@ -376,7 +376,7 @@ python -m deepal_s05 --port socket://localhost:35000 --signals examples/signals_
 ## รันชุดทดสอบ
 
 ```bash
-pip install pytest ELM327-emulator
+pip install pytest "ELM327-emulator @ git+https://github.com/Ircama/ELM327-emulator@v4.0.0"
 python -m pytest
 ```
 

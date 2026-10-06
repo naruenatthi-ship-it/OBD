@@ -74,7 +74,7 @@ python -m deepal_s05 --port COM5 checkup
 **ยังไม่มีรถหรือกล่อง?** ลองกับตัวจำลองได้:
 
 ```bash
-pip install ELM327-emulator
+pip install "ELM327-emulator @ git+https://github.com/Ircama/ELM327-emulator@v4.0.0"
 python emulator/run_emulator.py
 python -m deepal_s05 --port socket://localhost:35000 --signals examples/signals_demo.json dashboard
 ```

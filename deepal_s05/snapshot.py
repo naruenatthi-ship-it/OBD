@@ -63,20 +63,49 @@ class Snapshot:
     raw: dict = field(default_factory=dict)
 
 
+def apply_groups(values, errors, raw, groups):
+    """Turn grouped signals (cells, temperature sensors) into arrays: the
+    members leave `values`, the array and its min/max/delta take their
+    place, and pack-level max/min are filled in when no direct signal
+    gave them."""
+    arrays = {}
+    for g in groups:
+        arr = g.collect(values)
+        for k in g.members:
+            values.pop(k, None)
+            errors.pop(k, None)
+            raw.pop(k, None)
+        if not arr:
+            continue
+        arrays[g.key] = arr
+        values.update(array_summary(g.key, arr))
+        if g.key == "cells":
+            values.setdefault("cell_v_max", max(arr))
+            values.setdefault("cell_v_min", min(arr))
+        elif g.key == "temps":
+            values.setdefault("batt_temp_max", max(arr))
+            values.setdefault("batt_temp_min", min(arr))
+    return arrays
+
+
 def take(elm, signals, arrays=(), capacity=pids.DEFAULT_CAPACITY_KWH,
          read_12v=True):
+    """`arrays` holds ArraySignal (one DID, many values) and GroupArray
+    (many signals gathered into one array) objects."""
+    groups = [a for a in arrays if hasattr(a, "members")]
+    did_arrays = [a for a in arrays if not hasattr(a, "members")]
     results = read_signals(elm, signals, capacity)
     values = {k: v for k, (_, v, _) in results.items()}
     errors = {k: e for k, (_, _, e) in results.items() if e}
     raw = {k: r for k, (r, _, _) in results.items() if r is not None}
+    arr_values = apply_groups(values, errors, raw, groups)
     values.update(pids.derived(values))
     if read_12v:
         try:
             values["aux_12v"] = elm.battery_voltage()
         except ElmError as e:
             errors["aux_12v"] = str(e)
-    arr_values = {}
-    for arr in arrays:
+    for arr in did_arrays:
         try:
             data = elm.read_did(arr.header, arr.did)
         except (NoData, NegativeResponse) as e:

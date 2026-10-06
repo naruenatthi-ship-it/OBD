@@ -7,8 +7,9 @@ import json
 import os
 import sys
 import time
+import unicodedata
 
-from . import alerts, analysis, config, dtc, pids, snapshot
+from . import alerts, analysis, config, dtc, obdb, pids, snapshot, vehicles
 from .elm327 import (
     Elm327, ElmError, NegativeResponse, NoData, response_header)
 
@@ -17,6 +18,7 @@ STATUS_TH = {
     pids.CANDIDATE: "รอยืนยัน",
     pids.EXPERIMENTAL: "ทดลอง",
     pids.CUSTOM: "เพิ่มเอง",
+    obdb.OBDB: "OBDb",
 }
 
 DERIVED_LABELS = {
@@ -35,12 +37,31 @@ def fmt(value):
     return str(value)
 
 
+def pad(text, width):
+    """Left-align `text` in `width` terminal columns. Thai vowel and tone
+    marks take no column of their own; longer text is cut with "~"."""
+    def spacing(ch):
+        return unicodedata.category(ch) not in ("Mn", "Me")
+    cols = sum(map(spacing, text))
+    if cols > width:
+        out, cols = "", 0
+        for ch in text:
+            if spacing(ch):
+                if cols == width - 1:
+                    break
+                cols += 1
+            out += ch
+        return out + "~"
+    return text + " " * (width - cols)
+
+
 def connect(args):
     def show(direction, text):
         print("   %s %s" % (direction, text.replace("\n", " | ")),
               file=sys.stderr)
     elm = Elm327(args.port, baudrate=args.baud, timeout=args.timeout,
-                 log=show if args.verbose else None)
+                 log=show if args.verbose else None,
+                 protocol=args.vehicle.protocol)
     info = elm.initialize()
     print("กล่อง OBD: %s   แรงดันขั้ว OBD: %s" % (
         info["version"], info["voltage"] or "-"))
@@ -66,40 +87,55 @@ def print_extras(snap, custom, arrays):
             fmt(v.get(sig.key)), sig.unit, snap.errors.get(sig.key, "")))
     for arr in arrays:
         values = snap.arrays.get(arr.key)
+        where = "กลุ่ม" if hasattr(arr, "members") else \
+            "%s:%04X" % (arr.header, arr.did)
         if values is None:
-            print("XX  %-8s %-26s %s" % ("%s:%04X" % (arr.header, arr.did),
-                                         arr.label, snap.errors.get(arr.key)))
+            print("XX  %-8s %-26s %s" % (where, arr.label,
+                                         snap.errors.get(arr.key, "ไม่มีค่า")))
             continue
         print("OK  %-8s %-26s %d ค่า  ต่ำสุด %s (#%d)  สูงสุด %s (#%d) %s" % (
-            "%s:%04X" % (arr.header, arr.did), arr.label, len(values),
+            where, arr.label, len(values),
             fmt(v[arr.key + "_min"]), v[arr.key + "_min_no"],
             fmt(v[arr.key + "_max"]), v[arr.key + "_max_no"], arr.unit))
 
 
 def cmd_check(args):
-    signals = pids.SIGNALS + args.custom
+    vehicle = args.vehicle
+    members = vehicle.group_members()
+    signals = vehicle.signals + args.custom
     with connect(args) as elm:
         snap = snapshot.take(elm, signals, args.arrays, args.capacity)
 
-    print("\nความจุแบตที่ตั้งไว้: %.2f kWh\n" % args.capacity)
-    print("%-3s %-8s %-26s %12s %-7s %-11s %s" % (
-        "", "คำสั่ง", "ค่า", "ผล", "หน่วย", "สถานะสูตร", "raw / หมายเหตุ"))
+    print("\nรถ: %s (ข้อมูลจาก %s)  ความจุแบตที่ตั้งไว้: %.2f kWh\n" % (
+        vehicle.name, vehicle.source, args.capacity))
+    print("%-3s %s %s %12s %s %s %s" % (
+        "", pad("คำสั่ง", 8), pad("ค่า", 26), "ผล", pad("หน่วย", 7),
+        pad("สถานะสูตร", 11), "raw / หมายเหตุ"))
     ok = 0
     report = []
-    for sig in pids.SIGNALS:
+    shown = [sig for sig in vehicle.signals if sig.key not in members]
+    for sig in shown:
         raw, value = snap.raw.get(sig.key), snap.values.get(sig.key)
         err = snap.errors.get(sig.key)
         mark = "OK " if raw is not None and err is None else "XX "
         ok += mark == "OK "
-        detail = raw.hex(" ").upper() if raw is not None else ""
+        detail = ""
+        if raw is not None:
+            detail = raw[:16].hex(" ").upper()
+            if len(raw) > 16:
+                detail += " ... (%d ไบต์)" % len(raw)
         if err:
             detail = (detail + "  " + err).strip()
         elif sig.note:
             detail += "  (" + sig.note + ")"
-        print("%-3s %-8s %-26s %12s %-7s %-11s %s" % (
-            mark, sig.request, sig.label, fmt(value), sig.unit,
-            STATUS_TH[sig.status], detail))
+        where = sig.request if len(sig.header) == 3 else \
+            "%s:%04X" % (sig.header[4:6], sig.did)
+        print("%-3s %-8s %s %12s %-7s %s %s" % (
+            mark, where, pad(sig.label, 26), fmt(value), sig.unit,
+            pad(STATUS_TH[sig.status], 11), detail))
     for sig in signals:
+        if sig.key in members:
+            continue
         raw = snap.raw.get(sig.key)
         report.append({
             "key": sig.key, "request": sig.request, "header": sig.header,
@@ -110,11 +146,11 @@ def cmd_check(args):
 
     for key, (label, unit) in DERIVED_LABELS.items():
         if snap.values.get(key) is not None:
-            print("%-3s %-8s %-26s %12s %s" % (
-                "", "", label, fmt(snap.values[key]), unit))
+            print("%-3s %-8s %s %12s %s" % (
+                "", "", pad(label, 26), fmt(snap.values[key]), unit))
     print_extras(snap, args.custom, args.arrays)
 
-    print("\nตอบกลับ %d จาก %d รายการ" % (ok, len(pids.SIGNALS)))
+    print("\nตอบกลับ %d จาก %d รายการ" % (ok, len(shown)))
     print("เทียบกับรถ: SOC ต้องตรงกับหน้าจอรถ, จอดนิ่งกระแสควรใกล้ 0 A")
 
     if args.save:
@@ -132,7 +168,7 @@ def cmd_check(args):
 
 def status_line(values, custom):
     text = ("%s  SOC %s%%  %sV  %sA  %skW  เซลล์ %s-%sV (Δ%smV)"
-            "  แบต %s-%s°C  SOH %s%%  12V %s" % (
+            "  แบต %s-%s°C%s  12V %s" % (
                 datetime.datetime.now().strftime("%H:%M:%S"),
                 fmt(values.get("soc")), fmt(values.get("pack_voltage")),
                 fmt(values.get("pack_current")),
@@ -142,14 +178,22 @@ def status_line(values, custom):
                 fmt(delta_mv(values)),
                 fmt(values.get("batt_temp_min")),
                 fmt(values.get("batt_temp_max")),
-                fmt(values.get("soh")), fmt(values.get("aux_12v"))))
+                # cars without an SOH signal never have the key
+                "  SOH %s%%" % fmt(values.get("soh")) if "soh" in values
+                else "", fmt(values.get("aux_12v"))))
     for sig in custom:
         text += "  %s %s%s" % (sig.label, fmt(values.get(sig.key)), sig.unit)
     return text
 
 
 def live_signals(args):
-    return [pids.SIGNALS_BY_KEY[k] for k in pids.LIVE_KEYS] + args.custom
+    return args.vehicle.live_signals() + args.custom
+
+
+def status_extras(args):
+    """Signals shown after the battery summary in live/charge lines."""
+    extra = [args.vehicle.signal(k) for k in args.vehicle.status_keys]
+    return [s for s in extra if s is not None] + args.custom
 
 
 def check_alerts(args, values, extra=()):
@@ -176,7 +220,7 @@ def cmd_live(args):
             count = 0
             while args.count == 0 or count < args.count:
                 snap = snapshot.take(elm, signals, args.arrays, args.capacity)
-                print(status_line(snap.values, args.custom))
+                print(status_line(snap.values, status_extras(args)))
                 check_alerts(args, snap.values)
                 if log:
                     log.write(snap)
@@ -224,7 +268,7 @@ def cmd_charge(args):
                               snap.values.get("pack_power_kw")))
                 p_state, p_text = analysis.charge_power_status(
                     power, expected_kw)
-                print(status_line(snap.values, args.custom))
+                print(status_line(snap.values, status_extras(args)))
                 print("    " + text)
                 extra = []
                 if p_state in ("low", "drop"):
@@ -263,12 +307,12 @@ def median(values):
                                                  values[mid]) / 2
 
 
-def sample_ir(elm, capacity, seconds, cells_array=None):
+def sample_ir(elm, capacity, seconds, cells_array=None, vehicle=None):
     """Read pack current and voltage (and cell voltages) in turn for
     `seconds`. Each voltage reading is paired with the average of the
     current read just before and after it."""
-    cur = pids.SIGNALS_BY_KEY["pack_current"]
-    volt = pids.SIGNALS_BY_KEY["pack_voltage"]
+    cur = vehicle.signal("pack_current")
+    volt = vehicle.signal("pack_voltage")
 
     def current():
         return cur.value(elm.read_did(cur.header, cur.did), capacity)
@@ -296,7 +340,8 @@ HEALTH_FIELDS = ["time", "zone", "soc", "delta_mv", "temp_max", "temp_min",
 
 def cmd_health(args):
     signals = live_signals(args)
-    cells_array = next((a for a in args.arrays if a.key == "cells"), None)
+    cells_array = next((a for a in args.arrays if a.key == "cells" and
+                        not hasattr(a, "members")), None)
     ir = None
     cell_ir = []
     with connect(args) as elm:
@@ -316,7 +361,7 @@ def cmd_health(args):
             try:
                 currents, voltages, cells = sample_ir(
                     elm, args.capacity, args.ir,
-                    cells_array if args.cell_ir else None)
+                    cells_array if args.cell_ir else None, args.vehicle)
             except (NoData, NegativeResponse) as e:
                 print("วัด IR ไม่สำเร็จ: %s" % e)
                 currents = []
@@ -429,10 +474,9 @@ def cmd_health(args):
 
 
 def header_list(args):
-    if args.headers:
+    if getattr(args, "headers", None):
         return [h.strip().upper() for h in args.headers.split(",") if h.strip()]
-    return ["%03X" % h for h in range(int(args.start, 16),
-                                      int(args.end, 16) + 1)]
+    return args.vehicle.default_headers(args.start, args.end)
 
 
 def scan_dtcs(elm, headers, show_all=False, quiet=False):
@@ -701,7 +745,7 @@ def cmd_checkup(args):
         problems = [alerts.Alert(lvl, "checkup%d" % i, "", 0, "", text)
                     for i, (lvl, text) in enumerate(findings)
                     if lvl >= alerts.WARN]
-        args.notifier.notify(problems, title="Deepal S05 checkup")
+        args.notifier.notify(problems, title=args.vehicle.name + " checkup")
     return 0
 
 
@@ -740,8 +784,8 @@ class Tracker:
 def cmd_drivetest(args):
     signals = live_signals(args)
     tracker = Tracker(["batt_temp_max"] + [s.key for s in args.custom])
-    cur = pids.SIGNALS_BY_KEY["pack_current"]
-    volt = pids.SIGNALS_BY_KEY["pack_voltage"]
+    cur = args.vehicle.signal("pack_current")
+    volt = args.vehicle.signal("pack_voltage")
     samples = []
     log = snapshot.CsvLog(args.csv, args.name) if args.csv else None
     print("⚠️ ให้คนอื่นขับ หรือทดสอบในที่ปลอดภัย คนขับห้ามดูจอหรือกดคอม")
@@ -796,7 +840,7 @@ def cmd_drivetest(args):
                     last_values = vals
                     if log:
                         log.write(snap)
-                    print(status_line(vals, args.custom))
+                    print(status_line(vals, status_extras(args)))
                     time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nหยุดบันทึก")
@@ -865,7 +909,7 @@ def cmd_drivetest(args):
                     for i, (lvl, text) in enumerate(findings)
                     if lvl >= alerts.WARN]
         if problems:
-            args.notifier.notify(problems, title="Deepal S05 drivetest")
+            args.notifier.notify(problems, title=args.vehicle.name + " drivetest")
     return 0
 
 
@@ -878,11 +922,16 @@ def cmd_autopilot(args):
     data_dir = os.path.abspath(args.data_dir)
 
     def open_elm():
-        return Elm327(args.port, baudrate=args.baud, timeout=args.timeout)
+        return Elm327(args.port, baudrate=args.baud, timeout=args.timeout,
+                      protocol=args.vehicle.protocol)
 
     def run_checkup():
         argv = ["--port", args.port, "--baud", str(args.baud),
-                "--capacity", str(args.capacity)]
+                "--capacity", str(args.capacity), "--car", args.car]
+        if args.obdb:
+            argv += ["--obdb", args.obdb]
+        if args.year:
+            argv += ["--year", str(args.year)]
         if args.signals:
             argv += ["--signals", args.signals]
         if args.ntfy:
@@ -903,7 +952,7 @@ def cmd_autopilot(args):
         run_checkup=run_checkup, shutdown_below=args.shutdown_below,
         shutdown=shutdown)
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
-                                   data_dir)
+                                   data_dir, car_name=args.vehicle.name)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("autopilot: เก็บข้อมูลที่ %s  หน้าจอ http://<IP>:%d" % (
         data_dir, args.http_port))
@@ -916,6 +965,22 @@ def cmd_autopilot(args):
         stop.set()
         server.shutdown()
         server.server_close()
+    return 0
+
+
+def cmd_fetch_obdb(args):
+    if args.car not in vehicles.OBDB_REPOS:
+        print("รถรุ่น %s ไม่ได้ใช้ข้อมูลจาก OBDb" % args.car)
+        return 1
+    repo, default = vehicles.OBDB_REPOS[args.car]
+    path = args.obdb or default
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    size = obdb.fetch(repo, path)
+    print("ดาวน์โหลดข้อมูลรถจาก OBDb แล้ว: %s (%.0f KB)" % (path, size / 1024))
+    print("ข้อมูลนี้มาจาก https://github.com/OBDb/%s ใช้สัญญาอนุญาต"
+          " CC BY-SA 4.0" % repo)
     return 0
 
 
@@ -988,7 +1053,8 @@ def cmd_dashboard(args):
         dashboard.serve(elm, live_signals(args), args.arrays, args.capacity,
                         host=args.host, port=args.http_port,
                         interval=args.interval, csv_path=args.csv,
-                        rules=args.alert_rules, notifier=args.notifier)
+                        rules=args.alert_rules, notifier=args.notifier,
+                        car_name=args.vehicle.name)
     return 0
 
 
@@ -1051,7 +1117,8 @@ def discover_header(elm, header, ranges, extended):
 
 
 def cmd_discover(args):
-    headers = [h.strip().upper() for h in args.header.split(",")]
+    headers = [h.strip().upper() for h in
+               (args.header or args.vehicle.default_header).split(",")]
     ranges = parse_ranges(args.ranges) if args.ranges else \
         [(int(args.start, 16), int(args.end, 16))]
     results = []
@@ -1131,7 +1198,8 @@ def cmd_record(args):
         print("ไม่มี DID ให้บันทึก ใช้ --dids-from ไฟล์จาก discover หรือ"
               " --dids 7A1:F2A0,761:F2C1")
         return 1
-    signals = [pids.SIGNALS_BY_KEY[k] for k in pids.LIVE_KEYS]
+    signals = [s for s in args.vehicle.live_signals()
+               if s.key not in args.vehicle.group_members()]
     path = args.csv
     print("บันทึก %d DID + ค่าอ้างอิงทุกรอบ ลง %s  กด Ctrl+C เพื่อหยุด" % (
         len(keys), path))
@@ -1216,15 +1284,15 @@ def as_text(raw):
 
 
 def cmd_ecus(args):
-    start, end = int(args.start, 16), int(args.end, 16)
+    headers = header_list(args)
     found = []
     with connect(args) as elm:
-        print("\nสแกนหา ECU ที่ header %03X-%03X (ใช้คำสั่งอ่าน 22F187)"
-              " กด Ctrl+C เพื่อหยุด\n" % (start, end))
+        print("\nสแกนหา ECU %d header (%s-%s) ด้วยคำสั่งอ่าน 22F187"
+              " กด Ctrl+C เพื่อหยุด\n" % (len(headers), headers[0],
+                                          headers[-1]))
         try:
-            for h in range(start, end + 1):
-                header = "%03X" % h
-                if h % 16 == 0:
+            for n, header in enumerate(headers):
+                if n % 16 == 0:
                     print("  ...%s" % header, file=sys.stderr)
                 try:
                     elm.read_did(header, 0xF187)
@@ -1330,8 +1398,12 @@ def build_parser():
     p.add_argument("--baud", type=int, default=38400,
                    help="baud rate ของกล่อง USB/บลูทูธ (ค่าเริ่มต้น 38400)")
     p.add_argument("--capacity", type=float,
-                   default=pids.DEFAULT_CAPACITY_KWH,
-                   help="ความจุแบต kWh (ค่าเริ่มต้น 56.1)")
+                   help="ความจุแบต kWh (ค่าเริ่มต้นตามรุ่นรถ เช่น Deepal S05 = 56.1)")
+    p.add_argument("--car", default="deepal-s05",
+                   choices=sorted(vehicles.CARS),
+                   help="รุ่นรถ (ค่าเริ่มต้น deepal-s05)")
+    p.add_argument("--obdb", help="ไฟล์ข้อมูลรถจาก OBDb (ค่าเริ่มต้นตามรุ่นรถ)")
+    p.add_argument("--year", type=int, help="ปีรุ่นรถ ใช้เลือกคำสั่งที่ต่างกันตามปี")
     p.add_argument("--timeout", type=float, default=2.0,
                    help="วินาทีที่รอคำตอบแต่ละคำสั่ง")
     p.add_argument("-v", "--verbose", action="store_true",
@@ -1357,7 +1429,7 @@ def build_parser():
     l.set_defaults(func=cmd_live)
 
     d = sub.add_parser("discover", help="สแกนหา DID ที่ ECU ตอบ (อ่านอย่างเดียว)")
-    d.add_argument("--header", default=pids.BMS_HEADER,
+    d.add_argument("--header",
                    help="header เดียวหรือหลายตัว เช่น 7A1,761")
     d.add_argument("--start", default="F200")
     d.add_argument("--end", default="F2FF")
@@ -1396,8 +1468,8 @@ def build_parser():
     co.set_defaults(func=cmd_correlate)
 
     e = sub.add_parser("ecus", help="สแกนหา ECU ทั้งหมดในรถ (อ่านอย่างเดียว)")
-    e.add_argument("--start", default="700")
-    e.add_argument("--end", default="7FF")
+    e.add_argument("--start", help="header แรก (ค่าเริ่มต้น 700 หรือ 00 สำหรับ 29 บิต)")
+    e.add_argument("--end", help="header สุดท้าย (ค่าเริ่มต้น 7FF หรือ FF)")
     e.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
     e.set_defaults(func=cmd_ecus)
 
@@ -1462,8 +1534,8 @@ def build_parser():
 
     t = sub.add_parser("dtc", help="อ่านโค้ดปัญหาจากทุก ECU (ไม่ลบโค้ด)")
     t.add_argument("--headers", help="ระบุ header เอง เช่น 7A1,761")
-    t.add_argument("--start", default="700")
-    t.add_argument("--end", default="7FF")
+    t.add_argument("--start")
+    t.add_argument("--end")
     t.add_argument("--all", action="store_true",
                    help="แสดงทุกโค้ดที่ ECU ส่งมา รวมที่ไม่มีสถานะใช้งาน")
     t.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
@@ -1475,8 +1547,8 @@ def build_parser():
                        help="ตรวจรถรายสัปดาห์ เทียบกับครั้งก่อน (ทำตอนรถ READY จอดอยู่)")
     k.add_argument("--samples", type=int, default=3)
     k.add_argument("--headers", help="สแกนโค้ดเฉพาะ header เหล่านี้ เช่น 7A1,761")
-    k.add_argument("--start", default="700")
-    k.add_argument("--end", default="7FF")
+    k.add_argument("--start")
+    k.add_argument("--end")
     k.add_argument("--history", default="checkup_history.csv")
     k.add_argument("--dtc-history", default="dtc_history.json")
     k.set_defaults(func=cmd_checkup)
@@ -1512,6 +1584,10 @@ def build_parser():
     ap.add_argument("--shutdown-below", type=float,
                     help="ปิด Pi เมื่อแบต 12V ต่ำกว่านี้นาน 10 นาที (เช่น 12.2)")
     ap.set_defaults(func=cmd_autopilot)
+
+    fo = sub.add_parser("fetch-obdb",
+                        help="ดาวน์โหลดข้อมูลรถจาก OBDb (เช่น --car crv-hybrid)")
+    fo.set_defaults(func=cmd_fetch_obdb)
 
     n = sub.add_parser("trends",
                        help="กราฟแนวโน้มจากประวัติ checkup/health (ไม่ต้องใส่ --port)")
@@ -1550,17 +1626,29 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.func not in (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
-                         cmd_correlate) and not args.port:
+    offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
+               cmd_correlate, cmd_fetch_obdb)
+    if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:
+        args.vehicle = vehicles.load(args.car, args.obdb, args.year)
+    except obdb.ObdbError as e:
+        if args.func not in offline:
+            parser.error(str(e))
+        args.vehicle = vehicles.deepal_s05()
+    if args.capacity is None:
+        args.capacity = args.vehicle.capacity
+    try:
         args.custom, args.arrays = config.load(args.signals)
+        args.arrays = list(args.vehicle.groups) + args.arrays
         args.alert_rules = alerts.merge_rules(
-            alerts.DEFAULT_RULES, config.load_alerts(args.signals))
+            alerts.DEFAULT_RULES,
+            args.vehicle.rule_overrides + config.load_alerts(args.signals))
     except config.ConfigError as e:
         parser.error(str(e))
-    args.notifier = alerts.Notifier(alerts.ntfy_sender(
-        args.ntfy_server, args.ntfy)) if args.ntfy else None
+    args.notifier = alerts.Notifier(
+        alerts.ntfy_sender(args.ntfy_server, args.ntfy),
+        name=args.vehicle.name) if args.ntfy else None
     try:
         return args.func(args)
     except ElmError as e:

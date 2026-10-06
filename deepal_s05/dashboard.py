@@ -102,9 +102,12 @@ def files_page(data_dir):
             % (rows or "<li>ยังไม่มีไฟล์</li>"))
 
 
-def make_server(poller, host="127.0.0.1", port=8000, data_dir=None):
+def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
+                car_name="Deepal S05"):
     """`poller` only needs a json() method. With `data_dir`, /files lists
     and serves the data files and /trends draws the trend charts."""
+    page = PAGE.replace("Deepal S05", html.escape(car_name))
+
     class Handler(BaseHTTPRequestHandler):
         def send_body(self, body, ctype, extra=()):
             self.send_response(200)
@@ -122,7 +125,7 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None):
                 self.send_body(poller.json().encode("utf-8"),
                                "application/json; charset=utf-8")
             elif path in ("/", "/index.html"):
-                self.send_body(PAGE.encode("utf-8"),
+                self.send_body(page.encode("utf-8"),
                                "text/html; charset=utf-8")
             elif data_dir and path in ("/files", "/files/"):
                 self.send_body(files_page(data_dir).encode("utf-8"),
@@ -161,11 +164,12 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None):
 
 
 def serve(elm, signals, arrays, capacity, host="127.0.0.1", port=8000,
-          interval=2.0, csv_path=None, rules=None, notifier=None):
+          interval=2.0, csv_path=None, rules=None, notifier=None,
+          car_name="Deepal S05"):
     csv_log = snapshot.CsvLog(csv_path) if csv_path else None
     poller = Poller(elm, signals, arrays, capacity, interval, csv_log,
                     rules, notifier)
-    server = make_server(poller, host, port)
+    server = make_server(poller, host, port, car_name=car_name)
     poller.start()
     shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
     print("เปิดเบราว์เซอร์ไปที่ http://%s:%d  กด Ctrl+C เพื่อหยุด" % (

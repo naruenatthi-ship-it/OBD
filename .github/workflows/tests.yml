@@ -15,5 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install pyserial pytest ELM327-emulator
+      # the 4.0.0 package on PyPI has mismatched version metadata that new
+      # pip versions reject, so install the same release from its git tag
+      - run: pip install pyserial pytest "ELM327-emulator @ git+https://github.com/Ircama/ELM327-emulator@v4.0.0"
       - run: python -m pytest -q

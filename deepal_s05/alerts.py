@@ -99,7 +99,8 @@ def evaluate(values, rules):
     out = []
     for r in rules:
         v = values.get(r.key)
-        if v is None or (r.requires and values.get(r.requires) is None):
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or \
+                (r.requires and values.get(r.requires) is None):
             continue
         level, limit, side = OK, None, ""
         for lvl, lim, s in ((CRIT, r.critical_above, ">"),
@@ -140,14 +141,17 @@ class Notifier:
     """Sends an alert when it is new, gets worse, or is still there after
     `cooldown` seconds. `send(title, message, priority)` does the delivery."""
 
-    def __init__(self, send, cooldown=900, clock=time.time):
+    def __init__(self, send, cooldown=900, clock=time.time,
+                 name="Deepal S05"):
         self.send = send
+        self.name = name  # default notification title
         self.cooldown = cooldown
         self.clock = clock
         self.last = {}  # key -> (level, time)
         self.error = None
 
-    def notify(self, alerts, title="Deepal S05"):
+    def notify(self, alerts, title=None):
+        title = title or self.name
         now = self.clock()
         due = []
         for a in alerts:

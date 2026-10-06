@@ -114,15 +114,17 @@ def open_port(port, baudrate=38400, timeout=1.0):
     return serial.Serial(port, baudrate=baudrate, timeout=timeout)
 
 
-def parse_can_frames(text):
-    """Parse ELM327 output with headers on (ATH1, 11-bit CAN) into a list of
-    (header, frame_bytes). Works with spaces on or off."""
+def parse_can_frames(text, header_len=3):
+    """Parse ELM327 output with headers on (ATH1) into a list of
+    (header, frame_bytes). `header_len` is 3 hex digits for 11-bit CAN and
+    8 for 29-bit CAN. Works with spaces on or off."""
     frames = []
     for line in text.replace("\r", "\n").split("\n"):
         line = line.strip().replace(" ", "").upper()
-        if not line or not re.fullmatch(r"[0-9A-F]+", line) or len(line) < 5:
+        if not line or not re.fullmatch(r"[0-9A-F]+", line) or \
+                len(line) < header_len + 2:
             continue
-        header, payload = line[:3], line[3:]
+        header, payload = line[:header_len], line[header_len:]
         if len(payload) % 2:
             continue
         frames.append((header, bytes.fromhex(payload)))
@@ -155,8 +157,21 @@ def assemble_isotp(frames):
 
 
 def response_header(request_header):
-    """Physical response id of an 11-bit request id (request + 8)."""
+    """Response id for a request id.
+
+    11-bit: request + 8 (7A1 -> 7A9). 29-bit physical (18DA<target><tester>):
+    target and tester swap (18DA01F1 -> 18DAF101). 29-bit functional
+    (18DB....) has no single responder: None."""
+    if len(request_header) == 8:
+        if request_header[2:4].upper() == "DA":
+            return (request_header[:4] + request_header[6:8] +
+                    request_header[4:6]).upper()
+        return None
     return "%03X" % (int(request_header, 16) + 8)
+
+
+def is_29bit(header):
+    return len(header) == 8
 
 
 # Requests the client is allowed to put on the bus (hex, no spaces)
@@ -166,11 +181,15 @@ ALLOWED_REQUESTS = re.compile(
 
 class Elm327:
     def __init__(self, port, baudrate=38400, timeout=2.0, log=None,
-                 ser=None):
+                 ser=None, protocol="6"):
+        """protocol: ELM327 ATSP number, "6" = CAN 11-bit 500 kbps (Deepal),
+        "7" = CAN 29-bit 500 kbps (Honda)."""
         self.port_name = port
         self.ser = ser or open_port(port, baudrate, timeout=0.2)
         self.timeout = timeout
         self.log = log  # optional callable(direction, text)
+        self.protocol = str(protocol)
+        self.header_len = 8 if self.protocol in ("7", "9") else 3
         self.header = None
         self.cra_supported = True
 
@@ -211,9 +230,11 @@ class Elm327:
         return reply
 
     def initialize(self):
-        """Reset the adapter and set it up for 11-bit 500 kbps CAN."""
+        """Reset the adapter and set it up for the CAN protocol given at
+        construction (11-bit or 29-bit, 500 kbps)."""
         self.command("ATZ", timeout=5)
-        for cmd in ("ATE0", "ATL0", "ATS1", "ATH1", "ATSP6", "ATCAF1"):
+        for cmd in ("ATE0", "ATL0", "ATS1", "ATH1", "ATSP" + self.protocol,
+                    "ATCAF1"):
             reply = self.command(cmd)
             if "OK" not in reply.upper():
                 raise ElmError("%s failed: %r" % (cmd, reply))
@@ -236,17 +257,36 @@ class Elm327:
             raise ElmError("ATRV: %r" % reply)
         return float(m.group(1))
 
+    def _ok(self, cmd):
+        reply = self.command(cmd)
+        if "OK" not in reply.upper():
+            raise ElmError("%s failed: %r" % (cmd, reply))
+
     def set_header(self, header):
-        """Address requests to `header` and only accept its response id."""
+        """Address requests to `header` and only accept its response id.
+        For 29-bit ids the priority byte goes through ATCP and the rest
+        through ATSH; functional 29-bit requests accept any 18DAF1xx."""
+        header = header.upper()
         if header == self.header:
             return
-        reply = self.command("ATSH" + header)
-        if "OK" not in reply.upper():
-            raise ElmError("ATSH%s failed: %r" % (header, reply))
+        if is_29bit(header):
+            self._ok("ATCP" + header[:2])
+            self._ok("ATSH" + header[2:])
+        else:
+            self._ok("ATSH" + header)
+        rx = response_header(header)
         if self.cra_supported:
-            reply = self.command("ATCRA" + response_header(header))
-            if "OK" not in reply.upper():
-                self.cra_supported = False
+            if rx is not None:
+                reply = self.command("ATCRA" + rx)
+                if "OK" not in reply.upper():
+                    self.cra_supported = False
+            else:
+                try:
+                    self._ok("ATCRA")  # clear a single-id filter first
+                    self._ok("ATCF" + header[:2] + "DA" + header[6:8] + "00")
+                    self._ok("ATCM1FFFFF00")
+                except ElmError:
+                    self.cra_supported = False
         self.header = header
 
     def request(self, header, payload):
@@ -262,11 +302,18 @@ class Elm327:
         for err in ERROR_REPLIES:
             if err in upper:
                 raise NoData(err)
-        rx = response_header(header)
-        frames = [f for h, f in parse_can_frames(reply) if h == rx]
-        if not frames:
+        rx = response_header(header.upper())
+        by_sender = {}
+        for h, f in parse_can_frames(reply, self.header_len):
+            if h == rx or (rx is None and
+                           h.startswith(header[:2] + "DA" + header[6:8])):
+                by_sender.setdefault(h, []).append(f)
+        if not by_sender:
             raise NoData("no frames from %s in %r" % (rx, reply))
-        return assemble_isotp(frames), reply
+        messages = []
+        for frames in by_sender.values():
+            messages += assemble_isotp(frames)
+        return messages, reply
 
     def _positive(self, header, payload):
         sid = int(payload[:2], 16)

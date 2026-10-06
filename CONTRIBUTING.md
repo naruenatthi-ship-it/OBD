@@ -24,7 +24,7 @@
 ## แก้โค้ด
 
 ```bash
-pip install pyserial pytest ELM327-emulator
+pip install pyserial pytest "ELM327-emulator @ git+https://github.com/Ircama/ELM327-emulator@v4.0.0"
 python -m pytest
 ```
 
