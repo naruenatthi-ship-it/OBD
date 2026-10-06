@@ -42,6 +42,8 @@
 pip install -r requirements.txt
 ```
 
+**ติดตั้งบน Raspberry Pi ไว้ในรถ (ทำงานอัตโนมัติ):** ดู [pi/README.md](pi/README.md)
+
 ## วิธีใช้กับรถ
 
 1. เสียบกล่องที่ช่อง OBD (ใต้คอนโซลฝั่งคนขับ) แล้วกดสตาร์ทรถให้ขึ้น READY
@@ -52,6 +54,8 @@ pip install -r requirements.txt
    - **WiFi:** ต่อ WiFi ของกล่อง แล้วใช้ `socket://192.168.0.10:35000`
      (IP/port ดูได้จากคู่มือกล่อง)
    - **USB:** `COM3` หรือ `/dev/ttyUSB0`
+   - **บลูทูธต่อตรง (Linux/Raspberry Pi):** จับคู่แล้วใช้ `rfcomm://AA:BB:CC:DD:EE:FF`
+     ไม่ต้องตั้ง `/dev/rfcomm0`
 3. ตรวจว่ารถตอบไหม:
 
 ```bash
@@ -380,9 +384,11 @@ deepal_s05/analysis.py  หาข้อมูลที่ดูเป็นแ�
 deepal_s05/dtc.py       แปลโค้ดปัญหา และเทียบกับการสแกนครั้งก่อน
 deepal_s05/alerts.py    เกณฑ์แจ้งเตือน และส่งแจ้งเตือนผ่าน ntfy
 deepal_s05/report.py    รายงาน HTML พร้อมกราฟ และกราฟแนวโน้ม (trends)
-deepal_s05/dashboard.py หน้าจอสดในเบราว์เซอร์
+deepal_s05/dashboard.py หน้าจอสดในเบราว์เซอร์ (และหน้าไฟล์/กราฟแนวโน้มบน Pi)
+deepal_s05/autopilot.py โหมดอัตโนมัติสำหรับ Raspberry Pi ในรถ
 deepal_s05/cli.py       คำสั่งทั้งหมด
 examples/               ไฟล์ --signals ตัวอย่างสำหรับตัวจำลอง
+pi/                     สคริปต์และคู่มือติดตั้งบน Raspberry Pi
 emulator/               scenario สำหรับ ELM327-emulator
 tests/                  ชุดทดสอบ
 ```

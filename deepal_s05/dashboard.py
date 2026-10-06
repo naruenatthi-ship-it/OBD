@@ -1,9 +1,12 @@
 """Live dashboard in the browser: a small HTTP server on the laptop that
 polls the adapter in a background thread and serves /data as JSON."""
 
+import html
 import json
+import os
 import threading
 import traceback
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import alerts, pids, snapshot
@@ -74,24 +77,82 @@ class Poller(threading.Thread):
             return json.dumps(self.data, ensure_ascii=False)
 
 
-def make_server(poller, host="127.0.0.1", port=8000):
+def list_files(data_dir):
+    """Data files offered for download: (name, size), newest first."""
+    out = []
+    for name in os.listdir(data_dir):
+        path = os.path.join(data_dir, name)
+        if os.path.isfile(path) and name.endswith((".csv", ".json", ".log",
+                                                   ".html")):
+            out.append((name, os.path.getsize(path), os.path.getmtime(path)))
+    out.sort(key=lambda f: -f[2])
+    return [(n, size) for n, size, _ in out]
+
+
+def files_page(data_dir):
+    rows = "".join(
+        '<li><a href="/files/%s">%s</a> <small>%.1f KB</small></li>' % (
+            urllib.parse.quote(n), html.escape(n), size / 1024)
+        for n, size in list_files(data_dir))
+    return ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
+            'content="width=device-width, initial-scale=1"><title>Deepal S05 '
+            'Files</title><body style="font-family:sans-serif;padding:16px">'
+            '<h1>ไฟล์ข้อมูล</h1><p><a href="/">กลับหน้าหลัก</a> · '
+            '<a href="/trends">กราฟแนวโน้ม</a></p><ul>%s</ul></body>'
+            % (rows or "<li>ยังไม่มีไฟล์</li>"))
+
+
+def make_server(poller, host="127.0.0.1", port=8000, data_dir=None):
+    """`poller` only needs a json() method. With `data_dir`, /files lists
+    and serves the data files and /trends draws the trend charts."""
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path.startswith("/data"):
-                body = poller.json().encode("utf-8")
-                ctype = "application/json; charset=utf-8"
-            elif self.path in ("/", "/index.html"):
-                body = PAGE.encode("utf-8")
-                ctype = "text/html; charset=utf-8"
-            else:
-                self.send_error(404)
-                return
+        def send_body(self, body, ctype, extra=()):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for k, v in extra:
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
+
+        def do_GET(self):
+            path = urllib.parse.urlparse(self.path).path
+            if path.startswith("/data"):
+                self.send_body(poller.json().encode("utf-8"),
+                               "application/json; charset=utf-8")
+            elif path in ("/", "/index.html"):
+                self.send_body(PAGE.encode("utf-8"),
+                               "text/html; charset=utf-8")
+            elif data_dir and path in ("/files", "/files/"):
+                self.send_body(files_page(data_dir).encode("utf-8"),
+                               "text/html; charset=utf-8")
+            elif data_dir and path.startswith("/files/"):
+                name = urllib.parse.unquote(path[len("/files/"):])
+                if name not in dict(list_files(data_dir)):
+                    self.send_error(404)
+                    return
+                with open(os.path.join(data_dir, name), "rb") as f:
+                    body = f.read()
+                self.send_body(body, "application/octet-stream", [
+                    ("Content-Disposition",
+                     "attachment; filename*=UTF-8''%s"
+                     % urllib.parse.quote(name))])
+            elif data_dir and path == "/trends":
+                from . import report
+                out = os.path.join(data_dir, "trends.html")
+                try:
+                    report.write_trends(
+                        os.path.join(data_dir, "checkup_history.csv"),
+                        os.path.join(data_dir, "health_history.csv"), out)
+                except SystemExit as e:
+                    self.send_body(str(e).encode("utf-8"),
+                                   "text/plain; charset=utf-8")
+                    return
+                with open(out, "rb") as f:
+                    self.send_body(f.read(), "text/html; charset=utf-8")
+            else:
+                self.send_error(404)
 
         def log_message(self, *args):
             pass
@@ -171,7 +232,8 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 .alert.crit { border-left-color:var(--bad); font-weight:600; }
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
-<header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div></header>
+<header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
+<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a></nav></header>
 <div class="alerts" id="alerts"></div>
 <div class="summary" id="summary"></div>
 <section class="panel" id="cellsPanel" hidden><h2 id="cellsTitle">แรงดันรายเซลล์</h2>
@@ -192,7 +254,9 @@ function render(d) {
   var st = document.getElementById('status');
   var age = d.time ? (Date.now()/1000 - d.time) : null;
   if (d.error) { st.textContent = d.error; st.className = 'status err'; }
-  else { st.textContent = 'อัปเดต ' + new Date(d.time*1000).toLocaleTimeString('th-TH') + (age > 15 ? ' (ข้อมูลเก่า)' : ''); st.className = 'status' + (age > 15 ? ' err' : ''); }
+  else if (!d.time) { st.textContent = d.status || 'รอข้อมูล...'; st.className = 'status'; }
+  else { st.textContent = (d.status ? d.status + ' · ' : '') + 'อัปเดต ' + new Date(d.time*1000).toLocaleTimeString('th-TH') + (age > 15 && !d.status ? ' (ข้อมูลเก่า)' : ''); st.className = 'status' + (age > 15 && !d.status ? ' err' : ''); }
+  document.getElementById('links').hidden = !d.files;
   document.getElementById('alerts').innerHTML = (d.alerts||[]).map(function(a){
     var div = document.createElement('div'); div.textContent = a.text;
     return '<div class="alert'+(a.level>=3?' crit':'')+'">'+div.innerHTML+'</div>';

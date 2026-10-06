@@ -4,6 +4,7 @@ import argparse
 import csv
 import datetime
 import json
+import os
 import sys
 import time
 
@@ -868,6 +869,56 @@ def cmd_drivetest(args):
     return 0
 
 
+def cmd_autopilot(args):
+    import subprocess
+    import threading
+
+    from . import autopilot, dashboard
+
+    data_dir = os.path.abspath(args.data_dir)
+
+    def open_elm():
+        return Elm327(args.port, baudrate=args.baud, timeout=args.timeout)
+
+    def run_checkup():
+        argv = ["--port", args.port, "--baud", str(args.baud),
+                "--capacity", str(args.capacity)]
+        if args.signals:
+            argv += ["--signals", args.signals]
+        if args.ntfy:
+            argv += ["--ntfy", args.ntfy, "--ntfy-server", args.ntfy_server]
+        argv += ["checkup",
+                 "--history", os.path.join(data_dir, "checkup_history.csv"),
+                 "--dtc-history", os.path.join(data_dir, "dtc_history.json")]
+        main(argv)
+
+    def shutdown():
+        subprocess.call(["sudo", "-n", "/sbin/shutdown", "-h", "now"])
+
+    pilot = autopilot.Autopilot(
+        open_elm, live_signals(args), args.arrays, data_dir,
+        capacity=args.capacity, rules=args.alert_rules,
+        notifier=args.notifier, interval=args.interval, wake_v=args.wake_v,
+        checkup_days=0 if args.no_checkup else args.checkup_days,
+        run_checkup=run_checkup, shutdown_below=args.shutdown_below,
+        shutdown=shutdown)
+    server = dashboard.make_server(pilot.state, args.host, args.http_port,
+                                   data_dir)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print("autopilot: เก็บข้อมูลที่ %s  หน้าจอ http://<IP>:%d" % (
+        data_dir, args.http_port))
+    stop = threading.Event()
+    try:
+        pilot.run(stop)
+    except KeyboardInterrupt:
+        print("\nหยุดแล้ว")
+    finally:
+        stop.set()
+        server.shutdown()
+        server.server_close()
+    return 0
+
+
 def cmd_trends(args):
     from . import report
     out = report.write_trends(args.history, args.health, args.out)
@@ -1263,6 +1314,23 @@ def build_parser():
     dt.add_argument("--csv", help="บันทึกค่าระหว่างทดสอบลง CSV")
     dt.add_argument("--history", default="drivetest_history.csv")
     dt.set_defaults(func=cmd_drivetest)
+
+    ap = sub.add_parser("autopilot",
+                        help="โหมดอัตโนมัติสำหรับ Raspberry Pi ที่ติดในรถ")
+    ap.add_argument("--data-dir", default="data",
+                    help="โฟลเดอร์เก็บไฟล์บันทึกและประวัติ")
+    ap.add_argument("--interval", type=float, default=5.0,
+                    help="วินาทีระหว่างการอ่านค่าตอนรถตื่น")
+    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--http-port", type=int, default=8000)
+    ap.add_argument("--wake-v", type=float, default=13.0,
+                    help="แรงดัน 12V ที่ถือว่ารถตื่น (DC-DC ทำงาน)")
+    ap.add_argument("--checkup-days", type=float, default=7,
+                    help="ทำ checkup อัตโนมัติทุกกี่วัน (ตอนจอดและรถ READY)")
+    ap.add_argument("--no-checkup", action="store_true")
+    ap.add_argument("--shutdown-below", type=float,
+                    help="ปิด Pi เมื่อแบต 12V ต่ำกว่านี้นาน 10 นาที (เช่น 12.2)")
+    ap.set_defaults(func=cmd_autopilot)
 
     n = sub.add_parser("trends",
                        help="กราฟแนวโน้มจากประวัติ checkup/health (ไม่ต้องใส่ --port)")

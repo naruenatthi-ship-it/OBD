@@ -8,6 +8,7 @@ access, reset or DTC-clear services to the vehicle.
 """
 
 import re
+import socket
 import time
 
 import serial
@@ -47,9 +48,67 @@ class NegativeResponse(ElmError):
         super().__init__("NRC 0x%02X %s" % (nrc, NRC_NAMES.get(nrc, "")))
 
 
+class SocketPort:
+    """The part of the pyserial interface Elm327 uses, over a connected
+    stream socket (Bluetooth RFCOMM)."""
+
+    def __init__(self, sock, timeout=0.2):
+        self.sock = sock
+        self.timeout = timeout
+        sock.settimeout(timeout)
+
+    def read(self, size=1):
+        try:
+            return self.sock.recv(size)
+        except socket.timeout:
+            return b""
+
+    def write(self, data):
+        self.sock.sendall(data)
+        return len(data)
+
+    def reset_input_buffer(self):
+        self.sock.setblocking(False)
+        try:
+            while self.sock.recv(4096):
+                pass
+        except OSError:  # nothing waiting (BlockingIOError is an OSError)
+            pass
+        finally:
+            self.sock.settimeout(self.timeout)
+
+    def close(self):
+        self.sock.close()
+
+
+RFCOMM_URL = re.compile(r"^rfcomm://((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})"
+                        r"(?::(\d+))?$")
+
+
+def open_rfcomm(url, timeout=0.2):
+    """rfcomm://AA:BB:CC:DD:EE:FF[:channel] connects straight to a paired
+    Bluetooth adapter (Linux, Windows) without binding /dev/rfcomm0."""
+    m = RFCOMM_URL.match(url)
+    if not m:
+        raise ValueError("ใช้รูปแบบ rfcomm://AA:BB:CC:DD:EE:FF หรือ "
+                         "rfcomm://AA:BB:CC:DD:EE:FF:1")
+    sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM,
+                         socket.BTPROTO_RFCOMM)
+    sock.settimeout(15)
+    try:
+        sock.connect((m.group(1), int(m.group(2) or 1)))
+    except OSError:
+        sock.close()
+        raise
+    return SocketPort(sock, timeout)
+
+
 def open_port(port, baudrate=38400, timeout=1.0):
-    """`port` is a serial device (/dev/rfcomm0, /dev/ttyUSB0, COM5) or a
-    pyserial URL such as socket://192.168.0.10:35000 for WiFi adapters."""
+    """`port` is a serial device (/dev/rfcomm0, /dev/ttyUSB0, COM5), a
+    pyserial URL such as socket://192.168.0.10:35000 for WiFi adapters, or
+    rfcomm://<MAC> for a paired Bluetooth adapter."""
+    if port.startswith("rfcomm://"):
+        return open_rfcomm(port, timeout)
     if "://" in port:
         return serial.serial_for_url(port, timeout=timeout)
     return serial.Serial(port, baudrate=baudrate, timeout=timeout)

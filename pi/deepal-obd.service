@@ -1,0 +1,15 @@
+[Unit]
+Description=Deepal S05 OBD autopilot
+After=bluetooth.target network-online.target
+Wants=bluetooth.target
+
+[Service]
+User=@USER@
+EnvironmentFile=/etc/default/deepal-obd
+WorkingDirectory=/opt/deepal-obd
+ExecStart=/bin/sh -c 'exec /usr/bin/python3 -m deepal_s05 --port "$OBD_PORT" $OBD_OPTIONS autopilot --data-dir /var/lib/deepal-obd $AUTOPILOT_OPTIONS'
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
