@@ -1,0 +1,29 @@
+name: เจอ DID ใหม่ / New DID found
+description: แกะค่าใหม่ได้ หรือเจอข้อมูลที่น่าสนใจ
+labels: [new-did]
+body:
+  - type: markdown
+    attributes:
+      value: "⚠️ ตัดเลข VIN และเบลอทะเบียนรถก่อนแนบไฟล์หรือรูป / Remove VINs and plates first."
+  - type: input
+    id: car
+    attributes:
+      label: รุ่นรถ / Car
+      placeholder: Deepal S05 Max 56.1 kWh, 2025
+    validations:
+      required: true
+  - type: input
+    id: did
+    attributes:
+      label: Header และ DID
+      placeholder: 7A1 → 22F2A0
+  - type: textarea
+    id: meaning
+    attributes:
+      label: คิดว่าเป็นค่าอะไร และสูตร / Suspected meaning and formula
+      placeholder: แรงดันรายเซลล์ 108 ค่า สูตร (A*256+B)/1000
+  - type: textarea
+    id: evidence
+    attributes:
+      label: หลักฐาน / Evidence
+      description: ค่าดิบหลายสถานการณ์ แนบไฟล์ scan_*.csv / rec_*.csv หรือรูปหน้าจอรถ

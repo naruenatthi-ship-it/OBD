@@ -229,3 +229,15 @@ def test_reverse_workflow(url, tmp_path, capsys):
     assert "did_761_F2C1" in rec.read_text(encoding="utf-8")
     assert main(["correlate", str(rec)]) == 0
     assert "ไบต์ที่เปลี่ยนระหว่างบันทึก" in capsys.readouterr().out
+
+
+def test_discover_leaves_out_vin(url, tmp_path, capsys):
+    out = tmp_path / "scan.csv"
+    assert main(["--port", url, "discover", "--header", "7A1", "--ranges",
+                 "F187-F190", "--save", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+    assert "F187" in text and "F190" not in text
+    assert "เลข VIN" in capsys.readouterr().out
+    assert main(["--port", url, "discover", "--header", "7A1", "--ranges",
+                 "F190-F190", "--keep-ids", "--save", str(out)]) == 0
+    assert "F190" in out.read_text(encoding="utf-8")

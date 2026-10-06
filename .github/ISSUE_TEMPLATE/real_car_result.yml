@@ -1,0 +1,29 @@
+name: ผลลองกับรถจริง / Real car result
+description: ลองกับรถแล้วค่าตรงหรือเพี้ยน บอกกันได้ที่นี่
+labels: [real-car]
+body:
+  - type: input
+    id: car
+    attributes:
+      label: รุ่นรถ / Car
+      placeholder: Deepal S05 Max 56.1 kWh, 2025, ประเทศไทย
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: กล่อง OBD / Adapter
+      placeholder: Vgate vLinker MC+ (ELM327 v2.2)
+  - type: textarea
+    id: output
+    attributes:
+      label: ผลจาก `check` / Output of `check`
+      description: วางข้อความทั้งหมดที่ขึ้นบนจอ
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: compare
+    attributes:
+      label: เทียบกับหน้าจอรถ / Compared with the car's display
+      placeholder: SOC บนจอ 72% ตรงกัน, แรงดันแพ็ก ...

@@ -73,6 +73,9 @@ obd record --dids-from scan_cold.csv --note charge --csv rec_charge.csv --durati
 
 ## ส่งไฟล์
 
+ไฟล์จาก `discover` และ `record` ตัดเลข VIN และ serial ออกให้แล้ว ถ้าจะโพสต์รูปหน้าจอรถในที่สาธารณะ
+ให้เบลอเลข VIN และทะเบียนรถก่อน
+
 `ecus.csv`, `ecus_charging.csv`, `dtc.csv`, `scan_cold.csv`, `scan_cold_ext.csv`,
 `scan_hot.csv`, `rec_drive.csv`, `rec_charge.csv` และรูปหน้าจอรถ
 

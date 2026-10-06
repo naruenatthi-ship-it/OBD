@@ -992,6 +992,11 @@ def cmd_dashboard(args):
     return 0
 
 
+# DIDs that identify the car or its parts (VIN, serial numbers); left out of
+# saved scans and recordings unless --keep-ids, so files can be shared.
+PRIVATE_DIDS = {0xF190, 0xF18C}  # VIN, ECU serial number
+
+
 def parse_ranges(text):
     """"0100-01FF,F100-F2FF" -> [(0x0100, 0x01FF), (0xF100, 0xF2FF)]"""
     out = []
@@ -1067,11 +1072,18 @@ def cmd_discover(args):
         with open(args.save, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["header", "did", "length", "raw", "cell_like"])
+            hidden = 0
             for header, did, raw, run in results:
+                if did in PRIVATE_DIDS and not args.keep_ids:
+                    hidden += 1
+                    continue
                 w.writerow([header, "%04X" % did, len(raw),
                             raw.hex().upper(),
                             analysis.describe_cell_run(run) if run else ""])
         print("บันทึกไว้ที่ %s" % args.save)
+        if hidden:
+            print("(ไม่ได้บันทึก DID ที่ระบุตัวรถ เช่น เลข VIN %d รายการ"
+                  " ใส่ --keep-ids ถ้าต้องการ)" % hidden)
     return 0
 
 
@@ -1114,6 +1126,7 @@ def cmd_record(args):
             header, _, did = item.strip().upper().partition(":")
             if did:
                 keys.append((header, did))
+    keys = [k for k in keys if int(k[1], 16) not in PRIVATE_DIDS]
     if not keys:
         print("ไม่มี DID ให้บันทึก ใช้ --dids-from ไฟล์จาก discover หรือ"
               " --dids 7A1:F2A0,761:F2C1")
@@ -1353,6 +1366,8 @@ def build_parser():
     d.add_argument("--extended", action="store_true",
                    help="เข้าโหมดวินิจฉัยขยาย (10 03) ก่อนอ่าน ใช้ตอนจอดเท่านั้น")
     d.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
+    d.add_argument("--keep-ids", action="store_true",
+                   help="บันทึก DID ที่ระบุตัวรถ (เลข VIN, serial) ไว้ในไฟล์ด้วย")
     d.set_defaults(func=cmd_discover)
 
     sd = sub.add_parser("scandiff",

@@ -1,0 +1,23 @@
+name: แจ้งปัญหา / Bug report
+description: โปรแกรมทำงานผิดพลาด
+labels: [bug]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: คำสั่งที่รัน / Command
+      placeholder: python -m deepal_s05 --port COM5 check
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: ข้อความที่ขึ้น / Output (ใส่ -v เพื่อดูคำตอบดิบ)
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: เครื่องและกล่อง / Computer and adapter
+      placeholder: Windows 11 / Raspberry Pi Zero 2 W, vLinker MC+

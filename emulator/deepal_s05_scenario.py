@@ -86,6 +86,8 @@ ObdMessage = {
                        "45 46 46 47 45 46 47 48 46 45 46 47 48 48 47 46"),
         "BMS_PART": entry("Part number", "F187", ascii_hex("DEMO-BMS-01")),
         "BMS_SW": entry("Software version", "F195", ascii_hex("V1.00")),
+        "BMS_VIN": entry("VIN (made up)", "F190",
+                         ascii_hex("DEMOVIN0000000001")),
         "BMS_EXT": fixed("Extended session", "1003", "50 03 00 32 01 F4"),
         "BMS_DEF": fixed("Default session", "1001", "50 01 00 32 01 F4"),
         "BMS_TP": fixed("Tester present", "3E00", "7E 00"),

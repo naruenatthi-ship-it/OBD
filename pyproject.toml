@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepal-s05-obd"
+version = "0.1.0"
+description = "Read-only battery and health monitoring for the Deepal S05 through an ELM327 adapter"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+dependencies = ["pyserial>=3.5"]
+
+[project.optional-dependencies]
+test = ["pytest", "ELM327-emulator"]
+
+[project.scripts]
+deepal-obd = "deepal_s05.cli:main"
+
+[tool.setuptools]
+packages = ["deepal_s05"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
