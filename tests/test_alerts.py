@@ -174,3 +174,29 @@ def test_append_row_adds_new_columns(tmp_path):
     append_row(path, {"time": "3", "c": "x"})
     lines = open(path, encoding="utf-8").read().splitlines()
     assert lines == ["time,a,b,c", "1,1.235,,", "2,2,,", "3,,,x"]
+
+
+def test_insulation_compared_with_usual(tmp_path):
+    history = tmp_path / "checkup_history.csv"
+    history.write_text("time,insulation_ohm_per_v\n"
+                       "2026-01-01T00:00:00,14000\n"
+                       "2026-01-08T00:00:00,\n"
+                       "2026-01-15T00:00:00,13000\n")
+    assert alerts.load_baselines(str(history)) == {}  # too few readings
+    with history.open("a") as f:
+        f.write("2026-01-22T00:00:00,15000\n")
+    usual = alerts.load_baselines(str(history))
+    assert usual == {"insulation_ohm_per_v": 14000}
+    assert alerts.load_baselines(str(tmp_path / "missing.csv")) == {}
+
+    values = alerts.add_baselines({"insulation_ohm_per_v": 5600}, usual)
+    assert values["insulation_pct_of_normal"] == pytest.approx(40)
+    # 5600 ohm/V is fine by the absolute limits but far below this car's
+    # usual value
+    found = alerts.evaluate(values, alerts.DEFAULT_RULES)
+    assert [a.key for a in found] == ["insulation_pct_of_normal"]
+    assert found[0].level == alerts.WARN
+    assert alerts.evaluate(alerts.add_baselines(
+        {"insulation_ohm_per_v": 12000}, usual), alerts.DEFAULT_RULES) == []
+    assert "insulation_pct_of_normal" not in alerts.add_baselines(
+        {"soc": 50}, usual)

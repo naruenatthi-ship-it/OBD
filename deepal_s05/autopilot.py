@@ -65,7 +65,7 @@ class Autopilot:
                  asleep_poll=60.0, rest_log_every=300.0, retry=30.0,
                  checkup_days=7.0, run_checkup=None, shutdown_below=None,
                  shutdown_after=600.0, shutdown=None, clock=time.time,
-                 info=None, vehicle=None):
+                 info=None, vehicle=None, baselines=None):
         self.open_elm = open_elm
         self.signals, self.arrays = signals, arrays
         self.data_dir = data_dir
@@ -82,6 +82,7 @@ class Autopilot:
         self.shutdown = shutdown
         self.clock = clock
         self.state = State(signals, arrays, info)
+        self.baselines = baselines or {}  # usual values, from checkups
         self.vehicle = vehicle  # BMS identification is read once when awake
         self.bms_read = vehicle is None
         self.elm = None
@@ -181,7 +182,8 @@ class Autopilot:
         checked = dict(values)
         checked["delta_mv"] = values.get("cells_delta_mv",
                                          values.get("cell_delta_mv"))
-        found = alerts.evaluate(checked, self.rules)
+        found = alerts.evaluate(alerts.add_baselines(checked, self.baselines),
+                                self.rules)
         if self.notifier and found:
             self.notifier.notify(found)
         self.state.update(time=snap.time, values=values, arrays=snap.arrays,
@@ -197,6 +199,8 @@ class Autopilot:
                 self.run_checkup()
             finally:
                 self.state.update(status="ตรวจรถเสร็จแล้ว")
+                self.baselines = alerts.load_baselines(
+                    self.path("checkup_history.csv"))
             return 1.0
         return self.interval
 

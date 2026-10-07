@@ -11,6 +11,8 @@ practice, not Deepal specifications. Override or add rules in the
   ]
 """
 
+import csv
+import statistics
 import time
 import urllib.request
 from dataclasses import dataclass, replace
@@ -75,7 +77,47 @@ DEFAULT_RULES = [
          warn_below=500, critical_below=100,
          advice="ฉนวนระบบไฟแรงสูงต่ำ เสี่ยงไฟรั่ว ควรให้ศูนย์ตรวจ"
                 " (มาตรฐานขั้นต่ำ 100 Ω/V)"),
+    # compared with this car's own usual value, see add_baselines()
+    Rule("insulation_pct_of_normal", "ค่าฉนวนเทียบกับปกติของรถคันนี้", "%",
+         warn_below=50,
+         advice="ค่าฉนวนตกลงมากจากที่เคยวัดได้ อาจมีความชื้นเข้าระบบไฟแรงสูง"
+                " ถ้าตกเฉพาะหลังฝนตกหรือล้างรถยิ่งน่าสงสัย ควรให้ศูนย์ตรวจ"),
 ]
+
+# value -> derived key holding it as a percentage of the car's usual value
+BASELINE_KEYS = {"insulation_ohm_per_v": "insulation_pct_of_normal"}
+
+
+def load_baselines(path, min_rows=3):
+    """The car's usual values: medians over earlier checkups in
+    checkup_history.csv, for keys with at least `min_rows` readings."""
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return {}
+    out = {}
+    for key in BASELINE_KEYS:
+        nums = []
+        for row in rows:
+            try:
+                nums.append(float(row.get(key)))
+            except (TypeError, ValueError):
+                pass
+        if len(nums) >= min_rows:
+            out[key] = statistics.median(nums)
+    return out
+
+
+def add_baselines(values, baselines):
+    """A copy of `values` with each baseline key also given as a
+    percentage of its usual value."""
+    out = dict(values)
+    for key, pct_key in BASELINE_KEYS.items():
+        v, usual = values.get(key), baselines.get(key)
+        if isinstance(v, (int, float)) and usual:
+            out[pct_key] = v / usual * 100
+    return out
 
 
 def merge_rules(defaults, overrides):

@@ -31,8 +31,9 @@ CELL_IR_FILE = "cell_ir.json"  # written by health --cell-ir
 class Poller(threading.Thread):
     def __init__(self, elm, signals, arrays, capacity, interval,
                  csv_log=None, rules=None, notifier=None, info=None,
-                 vehicle=None):
+                 vehicle=None, baselines=None):
         super().__init__(daemon=True)
+        self.baselines = baselines or {}
         self.vehicle = vehicle  # to read the BMS identification once
         self.rules = alerts.DEFAULT_RULES if rules is None else rules
         self.notifier = notifier
@@ -69,7 +70,8 @@ class Poller(threading.Thread):
                 values = dict(snap.values)
                 values["delta_mv"] = values.get(
                     "cells_delta_mv", values.get("cell_delta_mv"))
-                found = alerts.evaluate(values, self.rules)
+                found = alerts.evaluate(
+                    alerts.add_baselines(values, self.baselines), self.rules)
                 if self.notifier and found:
                     self.notifier.notify(found)
                 with self.lock:
@@ -198,10 +200,10 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
 def serve(elm, signals, arrays, capacity, host="127.0.0.1", port=8000,
           interval=2.0, csv_path=None, rules=None, notifier=None,
           car_name="Deepal S05", info=None, vehicle=None,
-          ir_path=CELL_IR_FILE):
+          ir_path=CELL_IR_FILE, baselines=None):
     csv_log = snapshot.CsvLog(csv_path) if csv_path else None
     poller = Poller(elm, signals, arrays, capacity, interval, csv_log,
-                    rules, notifier, info, vehicle)
+                    rules, notifier, info, vehicle, baselines)
     server = make_server(poller, host, port, car_name=car_name,
                          ir_path=ir_path)
     poller.start()

@@ -221,7 +221,8 @@ def status_extras(args):
 
 def check_alerts(args, values, extra=()):
     """Evaluate the warning rules, print them and push notifications."""
-    values = dict(values, delta_mv=delta_mv(values))
+    values = alerts.add_baselines(dict(values, delta_mv=delta_mv(values)),
+                                  args.baselines)
     found = alerts.evaluate(values, args.alert_rules) + list(extra)
     for a in found:
         print("    " + a.text())
@@ -721,8 +722,9 @@ def cmd_checkup(args):
     zone = soc_zone(values.get("soc"))
     active = [r for r in records if r["active"]]
 
-    findings = [(a.level, a.message) for a in
-                alerts.evaluate(values, args.alert_rules)]
+    usual = alerts.load_baselines(args.history)  # earlier checkups only
+    findings = [(a.level, a.message) for a in alerts.evaluate(
+        alerts.add_baselines(values, usual), args.alert_rules)]
     for r in active:
         serious = r["status"] & (dtc.CONFIRMED | dtc.WARNING_LAMP)
         findings.append((alerts.CRIT if r["status"] & dtc.WARNING_LAMP
@@ -991,7 +993,7 @@ def cmd_autopilot(args):
         notifier=args.notifier, interval=args.interval, wake_v=args.wake_v,
         checkup_days=0 if args.no_checkup else args.checkup_days,
         run_checkup=run_checkup, shutdown_below=args.shutdown_below,
-        shutdown=shutdown, vehicle=args.vehicle,
+        shutdown=shutdown, vehicle=args.vehicle, baselines=args.baselines,
         info=identity.pack_info(args.vehicle, args.capacity,
                                 abnormal_mv=args.abnormal_mv))
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
@@ -1100,7 +1102,8 @@ def cmd_dashboard(args):
                         car_name=args.vehicle.name,
                         info=identity.pack_info(args.vehicle, args.capacity,
                                                 abnormal_mv=args.abnormal_mv),
-                        vehicle=args.vehicle, ir_path=args.cell_ir)
+                        vehicle=args.vehicle, ir_path=args.cell_ir,
+                        baselines=args.baselines)
     return 0
 
 
@@ -1682,6 +1685,9 @@ def main(argv=None):
             args.vehicle.rule_overrides + config.load_alerts(args.signals))
     except config.ConfigError as e:
         parser.error(str(e))
+    args.baselines = alerts.load_baselines(
+        os.path.join(args.data_dir, "checkup_history.csv")
+        if args.func is cmd_autopilot else "checkup_history.csv")
     args.notifier = alerts.Notifier(
         alerts.ntfy_sender(args.ntfy_server, args.ntfy),
         name=args.vehicle.name) if args.ntfy else None
