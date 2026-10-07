@@ -261,6 +261,7 @@ TRENDS = [
     ("batt_temp_max", "อุณหภูมิแบตสูงสุด", "°C"),
     ("temp_delta_c", "อุณหภูมิในแพ็กต่างกัน", "°C"),
     ("dtc_active", "จำนวนโค้ดปัญหาที่ใช้งานอยู่", "โค้ด"),
+    ("insulation_ohm_per_v", "ความต้านทานฉนวนไฟแรงสูง", "Ω/V"),
     ("ir_mohm", "IR แพ็ก (จาก health --ir)", "mΩ"),
 ]
 ZONE_LABEL = {"top": "SOC ≥ 95%", "low": "SOC ≤ 25%", "mid": "SOC กลาง",

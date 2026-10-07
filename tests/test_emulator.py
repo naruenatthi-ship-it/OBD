@@ -108,19 +108,25 @@ def test_charge_and_health(url, tmp_path, capsys, monkeypatch):
     assert (tmp_path / "health_history.csv").exists()
 
 
-def test_dashboard_data(url):
+def test_dashboard_data(url, tmp_path):
     import json
     import threading
     import urllib.request
 
-    from deepal_s05 import config, dashboard
+    from deepal_s05 import config, dashboard, identity, vehicles
 
     signals, arrays = config.load(DEMO)
+    vehicle = vehicles.deepal_s05()
+    ir_file = tmp_path / "cell_ir.json"
+    ir_file.write_text(json.dumps({"pack_mohm": 61, "cells": [0.4, 0.8]}))
     with Elm327(url) as elm:
         elm.initialize()
         poller = dashboard.Poller(elm, pids.SIGNALS[:3] + signals, arrays,
-                                  56.1, interval=0.2)
-        server = dashboard.make_server(poller, "127.0.0.1", 0)
+                                  56.1, interval=0.2,
+                                  info=identity.pack_info(vehicle, 56.1),
+                                  vehicle=vehicle)
+        server = dashboard.make_server(poller, "127.0.0.1", 0,
+                                       ir_path=str(ir_file))
         port = server.server_address[1]
         threading.Thread(target=server.serve_forever, daemon=True).start()
         poller.start()
@@ -134,6 +140,8 @@ def test_dashboard_data(url):
                 time.sleep(0.2)
             page = urllib.request.urlopen(
                 "http://127.0.0.1:%d/" % port).read().decode()
+            ir = json.load(urllib.request.urlopen(
+                "http://127.0.0.1:%d/ir" % port))
         finally:
             poller.stop.set()
             poller.join(5)
@@ -142,8 +150,45 @@ def test_dashboard_data(url):
     assert data["error"] is None
     assert len(data["arrays"]["cells"]) == 108
     assert data["values"]["obc_temp"] == 50
-    assert data["custom"] == ["obc_temp"]
+    assert data["custom"] == ["obc_temp", "insulation_kohm"]
+    assert data["values"]["insulation_kohm"] == 5000
+    assert data["values"]["insulation_ohm_per_v"] == pytest.approx(
+        5000e3 / 358.6)
+    assert data["info"]["bms"]["part_number"] == "DEMO-BMS-01"
+    assert data["info"]["capacity_kwh"] == 56.1
+    assert ir["cells"] == [0.4, 0.8]
     assert "Deepal S05" in page
+
+
+def test_health_saves_cell_ir(url, tmp_path, capsys):
+    history = tmp_path / "health.csv"
+    assert main(["--port", url, "--signals", DEMO, "health", "--samples",
+                 "1", "--ir", "3", "--cell-ir", "--min-range", "5",
+                 "--history", str(history)]) == 0
+    saved = json.loads((tmp_path / "cell_ir.json").read_text())
+    assert len(saved["cells"]) == 108
+    assert "แท็บ IR" in capsys.readouterr().out
+
+
+def test_check_reads_bms_and_known_pack(url, tmp_path, capsys,
+                                        monkeypatch):
+    from deepal_s05 import vehicles
+    out = tmp_path / "check.json"
+    assert main(["--port", url, "check", "--save", str(out)]) == 0
+    text = capsys.readouterr().out
+    assert "BMS 7A1: รหัสชิ้นส่วน: DEMO-BMS-01" in text
+    assert "ยังไม่รู้จักรหัส BMS นี้" in text
+    assert json.loads(out.read_text())["bms"]["sw_version"] == "V1.00"
+
+    monkeypatch.setattr(vehicles, "DEEPAL_PACKS", [
+        {"part": "DEMO-BMS", "capacity": 68.82, "label": "ทดสอบ"}])
+    assert main(["--port", url, "check", "--save", str(out)]) == 0
+    assert "รู้จักแบตนี้: ทดสอบ (68.82 kWh)" in capsys.readouterr().out
+    assert json.loads(out.read_text())["capacity_kwh"] == 68.82
+    # an explicit --capacity wins over the detected pack
+    assert main(["--port", url, "--capacity", "56.1", "check", "--save",
+                 str(out)]) == 0
+    assert json.loads(out.read_text())["capacity_kwh"] == 56.1
 
 
 def test_cli_dtc(url, tmp_path, capsys, monkeypatch):

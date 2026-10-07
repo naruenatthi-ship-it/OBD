@@ -2,7 +2,9 @@
   "_comment": "ใช้กับตัวจำลอง (emulator/run_emulator.py) เท่านั้น DID และ header ในไฟล์นี้แต่งขึ้น ไม่ใช่ของรถจริง",
   "signals": [
     {"key": "obc_temp", "label": "อุณหภูมิ OBC", "header": "761",
-     "did": "F2C1", "formula": "A-40", "unit": "C"}
+     "did": "F2C1", "formula": "A-40", "unit": "C"},
+    {"key": "insulation_kohm", "label": "ความต้านทานฉนวน", "header": "7A1",
+     "did": "F2A2", "formula": "A*256+B", "unit": "kΩ"}
   ],
   "arrays": [
     {"key": "cells", "label": "แรงดันรายเซลล์", "header": "7A1",

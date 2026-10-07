@@ -112,4 +112,9 @@ def derived(values):
     hi, lo = values.get("batt_temp_max"), values.get("batt_temp_min")
     if hi is not None and lo is not None:
         out["temp_delta_c"] = hi - lo
+    # insulation resistance per volt of pack voltage, the unit safety
+    # standards use (ISO 6469-3: at least 100 ohm/V on the DC side)
+    r = values.get("insulation_kohm")
+    if isinstance(r, (int, float)) and v:
+        out["insulation_ohm_per_v"] = r * 1000 / v
     return out

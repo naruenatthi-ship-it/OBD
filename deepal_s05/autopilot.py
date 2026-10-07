@@ -14,14 +14,14 @@ import threading
 import time
 import traceback
 
-from . import alerts, dashboard, pids, snapshot
+from . import alerts, dashboard, identity, pids, snapshot
 from .elm327 import ElmError
 
 
 class State:
     """What the dashboard shows; json() is called from the HTTP thread."""
 
-    def __init__(self, signals, arrays):
+    def __init__(self, signals, arrays, info=None):
         labels = dict(dashboard.LABELS)
         labels.update({s.key: (s.label, s.unit) for s in signals
                        if s.status == pids.CUSTOM})
@@ -31,7 +31,8 @@ class State:
                      "alerts": [], "error": None, "status": "กำลังเริ่ม...",
                      "labels": labels, "files": True,
                      "custom": [s.key for s in signals
-                                if s.status == pids.CUSTOM]}
+                                if s.status == pids.CUSTOM],
+                     "info": info or {}}
 
     def update(self, **kw):
         with self.lock:
@@ -63,7 +64,8 @@ class Autopilot:
                  notifier=None, interval=5.0, wake_v=13.0,
                  asleep_poll=60.0, rest_log_every=300.0, retry=30.0,
                  checkup_days=7.0, run_checkup=None, shutdown_below=None,
-                 shutdown_after=600.0, shutdown=None, clock=time.time):
+                 shutdown_after=600.0, shutdown=None, clock=time.time,
+                 info=None, vehicle=None):
         self.open_elm = open_elm
         self.signals, self.arrays = signals, arrays
         self.data_dir = data_dir
@@ -79,7 +81,9 @@ class Autopilot:
             shutdown_after
         self.shutdown = shutdown
         self.clock = clock
-        self.state = State(signals, arrays)
+        self.state = State(signals, arrays, info)
+        self.vehicle = vehicle  # BMS identification is read once when awake
+        self.bms_read = vehicle is None
         self.elm = None
         self.awake_since = None
         self.low_since = None
@@ -166,6 +170,14 @@ class Autopilot:
                               alerts=[], status="รถตื่นแต่ BMS ยังไม่ตอบ")
             return self.interval
         self.log_drive(snap)
+        if not self.bms_read:
+            self.bms_read = True
+            try:
+                _, bms = identity.bms_identity(self.elm, self.vehicle)
+                with self.state.lock:
+                    self.state.data["info"]["bms"] = bms
+            except (ElmError, OSError):
+                pass
         checked = dict(values)
         checked["delta_mv"] = values.get("cells_delta_mv",
                                          values.get("cell_delta_mv"))

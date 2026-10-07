@@ -70,6 +70,11 @@ DEFAULT_RULES = [
          critical_above=3.7, advice="มีเซลล์แรงดันสูงเกินช่วงปกติของ LFP"),
     Rule("soh", "SOH", "%", warn_below=85, critical_below=75,
          advice="สุขภาพแบตลดลง (สูตร SOH ยังรอยืนยัน)"),
+    # needs an "insulation_kohm" signal in the --signals file
+    Rule("insulation_ohm_per_v", "ความต้านทานฉนวนไฟแรงสูง", "Ω/V",
+         warn_below=500, critical_below=100,
+         advice="ฉนวนระบบไฟแรงสูงต่ำ เสี่ยงไฟรั่ว ควรให้ศูนย์ตรวจ"
+                " (มาตรฐานขั้นต่ำ 100 Ω/V)"),
 ]
 
 

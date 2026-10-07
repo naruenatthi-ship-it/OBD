@@ -41,6 +41,9 @@ class Vehicle:
     status_keys: list = field(default_factory=list)   # extra status line
     rule_overrides: list = field(default_factory=list)
     source: str = ""
+    bms_headers: tuple = ()        # where to read the BMS identification
+    cell_nominal_v: float = None   # for the rated pack voltage estimate
+    known_packs: list = field(default_factory=list)  # see identity.match_pack
 
     @property
     def can29(self):
@@ -67,12 +70,19 @@ class Vehicle:
         return ["%03X" % i for i in range(lo, hi + 1)]
 
 
+# BMS part numbers (F187, prefix match) of known packs. Empty until part
+# numbers have been read from real cars; add entries like
+#   {"part": "XXXXXXXX", "capacity": 56.1, "label": "56.1 kWh LFP"}
+DEEPAL_PACKS = []
+
+
 def deepal_s05(**_):
     return Vehicle(
         key="deepal-s05", name="Deepal S05", protocol="6",
         signals=list(pids.SIGNALS), live_keys=list(pids.LIVE_KEYS),
         capacity=pids.DEFAULT_CAPACITY_KWH, default_header=pids.BMS_HEADER,
-        source="jpires71/Deepal_S05_PIDs")
+        source="jpires71/Deepal_S05_PIDs", bms_headers=(pids.BMS_HEADER,),
+        cell_nominal_v=3.2, known_packs=list(DEEPAL_PACKS))
 
 
 # -- Honda CR-V e:HEV (6th generation, 2023-) from OBDb -------------------
@@ -169,7 +179,9 @@ def crv_hybrid(obdb_path=None, year=None, **_):
         signals=signals, live_keys=list(CRV_LIVE), capacity=1.1,
         default_header="18DA01F1", groups=groups,
         status_keys=list(CRV_STATUS), rule_overrides=list(CRV_RULES),
-        source="OBDb/%s (CC BY-SA 4.0)" % CRV_REPO)
+        source="OBDb/%s (CC BY-SA 4.0)" % CRV_REPO,
+        # the battery data answers at 01 or 16 depending on model year
+        bms_headers=("18DA01F1", "18DA16F1"), cell_nominal_v=3.7)
 
 
 CARS = {

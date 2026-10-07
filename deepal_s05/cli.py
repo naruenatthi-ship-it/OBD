@@ -9,7 +9,8 @@ import sys
 import time
 import unicodedata
 
-from . import alerts, analysis, config, dtc, obdb, pids, snapshot, vehicles
+from . import (alerts, analysis, config, dashboard, dtc, identity, obdb,
+               pids, snapshot, vehicles)
 from .elm327 import (
     Elm327, ElmError, NegativeResponse, NoData, response_header)
 
@@ -25,6 +26,7 @@ DERIVED_LABELS = {
     "pack_power_kw": ("กำลังแพ็ก (V×I)", "kW"),
     "cell_delta_mv": ("ส่วนต่างแรงดันเซลล์", "mV"),
     "temp_delta_c": ("ส่วนต่างอุณหภูมิแบต", "C"),
+    "insulation_ohm_per_v": ("ความต้านทานฉนวน ต่อโวลต์", "Ω/V"),
 }
 
 
@@ -99,11 +101,31 @@ def print_extras(snap, custom, arrays):
             fmt(v[arr.key + "_max"]), v[arr.key + "_max_no"], arr.unit))
 
 
+def detect_pack(args, elm):
+    """Read the BMS identification, print it, and take the pack capacity
+    from a known part number unless --capacity was given."""
+    header, info = identity.bms_identity(elm, args.vehicle)
+    if not header:
+        print("BMS: อ่านรหัสไม่ได้")
+        return {}
+    print("BMS %s: %s" % (header, identity.describe(info) or "ไม่บอกรหัส"))
+    pack = identity.match_pack(args.vehicle.known_packs, info)
+    if pack:
+        print("  รู้จักแบตนี้: %s (%.2f kWh)" % (pack["label"], pack["capacity"]))
+        if not args.capacity_set:
+            args.capacity = pack["capacity"]
+    elif info.get("part_number"):
+        print("  ยังไม่รู้จักรหัส BMS นี้ ใช้ความจุ %.2f kWh ตามค่าตั้ง"
+              " (ถ้าไม่ตรงให้ใส่ --capacity)" % args.capacity)
+    return dict(info, header=header)
+
+
 def cmd_check(args):
     vehicle = args.vehicle
     members = vehicle.group_members()
     signals = vehicle.signals + args.custom
     with connect(args) as elm:
+        bms = detect_pack(args, elm)
         snap = snapshot.take(elm, signals, args.arrays, args.capacity)
 
     print("\nรถ: %s (ข้อมูลจาก %s)  ความจุแบตที่ตั้งไว้: %.2f kWh\n" % (
@@ -158,6 +180,7 @@ def cmd_check(args):
             json.dump({
                 "time": datetime.datetime.now().isoformat(timespec="seconds"),
                 "capacity_kwh": args.capacity,
+                "bms": bms,
                 "aux_12v": snap.values.get("aux_12v"),
                 "signals": report,
                 "arrays": snap.arrays,
@@ -307,6 +330,16 @@ def median(values):
                                                  values[mid]) / 2
 
 
+def read_cells(elm, cells_array, vehicle, capacity):
+    """Cell voltages from a one-DID array or from a group of signals."""
+    if hasattr(cells_array, "members"):
+        sigs = [s for s in map(vehicle.signal, cells_array.members) if s]
+        results = snapshot.read_signals(elm, sigs, capacity)
+        return cells_array.collect({k: v for k, (_, v, _) in results.items()})
+    return cells_array.decode(elm.read_did(cells_array.header,
+                                           cells_array.did))
+
+
 def sample_ir(elm, capacity, seconds, cells_array=None, vehicle=None):
     """Read pack current and voltage (and cell voltages) in turn for
     `seconds`. Each voltage reading is paired with the average of the
@@ -324,8 +357,7 @@ def sample_ir(elm, capacity, seconds, cells_array=None, vehicle=None):
         v = volt.value(elm.read_did(volt.header, volt.did), capacity)
         cell_values = None
         if cells_array:
-            cell_values = cells_array.decode(
-                elm.read_did(cells_array.header, cells_array.did))
+            cell_values = read_cells(elm, cells_array, vehicle, capacity)
         i_after = current()
         currents.append((i_before + i_after) / 2)
         voltages.append(v)
@@ -340,8 +372,7 @@ HEALTH_FIELDS = ["time", "zone", "soc", "delta_mv", "temp_max", "temp_min",
 
 def cmd_health(args):
     signals = live_signals(args)
-    cells_array = next((a for a in args.arrays if a.key == "cells" and
-                        not hasattr(a, "members")), None)
+    cells_array = next((a for a in args.arrays if a.key == "cells"), None)
     ir = None
     cell_ir = []
     with connect(args) as elm:
@@ -357,7 +388,8 @@ def cmd_health(args):
                   " ให้คนอื่นขับแล้วเร่งแรงสลับกับปล่อยคันเร่ง"
                   " (จอดนิ่งกระแสเปลี่ยนน้อย มักวัดไม่ได้)" % args.ir)
             if args.cell_ir and not cells_array:
-                print("ข้าม IR รายเซลล์: ยังไม่มี array ชื่อ cells ใน --signals")
+                print("ข้าม IR รายเซลล์: ยังอ่านแรงดันรายเซลล์ไม่ได้"
+                      " (ต้องมี array ชื่อ cells ใน --signals)")
             try:
                 currents, voltages, cells = sample_ir(
                     elm, args.capacity, args.ir,
@@ -452,6 +484,15 @@ def cmd_health(args):
                             key=lambda c: -c[1])
             print("  IR รายเซลล์สูงสุด 5 อันดับ: " + ", ".join(
                 "#%d %.2f mΩ" % c for c in ranked[:5]))
+            path = os.path.join(os.path.dirname(args.history),
+                                dashboard.CELL_IR_FILE)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"time": result["time"], "pack_mohm": ir["r_mohm"],
+                           "r2": ir["r2"],
+                           "cells": [None if m is None else round(m, 3)
+                                     for _, m in cell_ir]}, f)
+            print("  บันทึก IR รายเซลล์ไว้ที่ %s (ดูได้ในแท็บ IR ของ dashboard)"
+                  % path)
     if result["aux_12v"] is not None:
         print("แบต 12V: ตอนรถ READY ควรประมาณ 13.5-14.5 V (DC-DC กำลังชาร์จ)"
               " ถ้าต่ำกว่า 13 V ตอน READY ให้ตรวจแบต 12V และ DC-DC")
@@ -573,8 +614,8 @@ def cmd_dtc(args):
 
 CHECKUP_FIELDS = ["time", "level", "zone", "soc", "soh", "delta_mv",
                   "batt_temp_max", "batt_temp_min", "temp_delta_c",
-                  "aux_12v", "charge_temp", "dtc_active", "dtc_new",
-                  "ecus"]
+                  "aux_12v", "charge_temp", "insulation_ohm_per_v",
+                  "dtc_active", "dtc_new", "ecus"]
 
 
 def append_row(path, row):
@@ -950,7 +991,9 @@ def cmd_autopilot(args):
         notifier=args.notifier, interval=args.interval, wake_v=args.wake_v,
         checkup_days=0 if args.no_checkup else args.checkup_days,
         run_checkup=run_checkup, shutdown_below=args.shutdown_below,
-        shutdown=shutdown)
+        shutdown=shutdown, vehicle=args.vehicle,
+        info=identity.pack_info(args.vehicle, args.capacity,
+                                abnormal_mv=args.abnormal_mv))
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
                                    data_dir, car_name=args.vehicle.name)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -1054,7 +1097,10 @@ def cmd_dashboard(args):
                         host=args.host, port=args.http_port,
                         interval=args.interval, csv_path=args.csv,
                         rules=args.alert_rules, notifier=args.notifier,
-                        car_name=args.vehicle.name)
+                        car_name=args.vehicle.name,
+                        info=identity.pack_info(args.vehicle, args.capacity,
+                                                abnormal_mv=args.abnormal_mv),
+                        vehicle=args.vehicle, ir_path=args.cell_ir)
     return 0
 
 
@@ -1265,24 +1311,6 @@ def cmd_correlate(args):
     return 0
 
 
-# Identification DIDs (ISO 14229) read from every ECU found
-ID_DIDS = [
-    (0xF187, "part_number", "รหัสชิ้นส่วน"),
-    (0xF18A, "supplier", "ผู้ผลิต"),
-    (0xF197, "system_name", "ชื่อระบบ"),
-    (0xF191, "hw_number", "เลขฮาร์ดแวร์"),
-    (0xF193, "hw_version", "เวอร์ชันฮาร์ดแวร์"),
-    (0xF195, "sw_version", "เวอร์ชันซอฟต์แวร์"),
-]
-
-
-def as_text(raw):
-    text = raw.decode("ascii", "replace").strip("\x00 ")
-    if raw and all(32 <= b < 127 or b == 0 for b in raw):
-        return text
-    return raw.hex(" ").upper()
-
-
 def cmd_ecus(args):
     headers = header_list(args)
     found = []
@@ -1302,23 +1330,21 @@ def cmd_ecus(args):
                     continue
                 info = {"header": header,
                         "response": response_header(header)}
-                for did, key, _ in ID_DIDS:
-                    try:
-                        info[key] = as_text(elm.read_did(header, did))
-                    except (NoData, NegativeResponse):
-                        info[key] = ""
+                try:
+                    info.update(identity.read_identity(elm, header))
+                except NoData:  # answered the probe only
+                    info.update({k: "" for _, k, _ in identity.ID_DIDS})
                 found.append(info)
                 print("พบ ECU  %s -> %s  %s" % (
-                    header, info["response"], "  ".join(
-                        "%s: %s" % (label, info[key])
-                        for _, key, label in ID_DIDS if info[key])))
+                    header, info["response"], identity.describe(
+                        {k: info[k] for _, k, _ in identity.ID_DIDS})))
         except KeyboardInterrupt:
             print("\nหยุดแล้ว")
     print("\nพบ %d ECU" % len(found))
     if args.save:
         with open(args.save, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, ["header", "response"] +
-                               [k for _, k, _ in ID_DIDS])
+                               [k for _, k, _ in identity.ID_DIDS])
             w.writeheader()
             w.writerows(found)
         print("บันทึกไว้ที่ %s" % args.save)
@@ -1583,6 +1609,9 @@ def build_parser():
     ap.add_argument("--no-checkup", action="store_true")
     ap.add_argument("--shutdown-below", type=float,
                     help="ปิด Pi เมื่อแบต 12V ต่ำกว่านี้นาน 10 นาที (เช่น 12.2)")
+    ap.add_argument("--abnormal-mv", type=float, default=30,
+                    help="หน้าจอทำเครื่องหมายเซลล์ที่ห่างค่าเฉลี่ยเกินกี่ mV"
+                         " (ค่าเริ่มต้น 30)")
     ap.set_defaults(func=cmd_autopilot)
 
     fo = sub.add_parser("fetch-obdb",
@@ -1618,6 +1647,12 @@ def build_parser():
     w.add_argument("--http-port", type=int, default=8000)
     w.add_argument("--interval", type=float, default=2.0)
     w.add_argument("--csv", help="บันทึกค่าลง CSV ไปด้วย")
+    w.add_argument("--abnormal-mv", type=float, default=30,
+                   help="หน้าจอทำเครื่องหมายเซลล์ที่ห่างค่าเฉลี่ยเกินกี่ mV"
+                        " (ค่าเริ่มต้น 30)")
+    w.add_argument("--cell-ir", default="cell_ir.json",
+                   help="ไฟล์ IR รายเซลล์จาก health --cell-ir"
+                        " (ค่าเริ่มต้น cell_ir.json)")
     w.set_defaults(func=cmd_dashboard)
 
     return p
@@ -1636,6 +1671,7 @@ def main(argv=None):
         if args.func not in offline:
             parser.error(str(e))
         args.vehicle = vehicles.deepal_s05()
+    args.capacity_set = args.capacity is not None
     if args.capacity is None:
         args.capacity = args.vehicle.capacity
     try:
