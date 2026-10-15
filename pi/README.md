@@ -62,7 +62,11 @@ cd OBD
 bash pi/install.sh
 ```
 
-ถ้ารีโปเป็นแบบส่วนตัว (private) แล้ว git clone ไม่ได้: ดาวน์โหลด ZIP จาก GitHub บนคอม
+ถ้ารีโปเป็นแบบส่วนตัว (private) `git clone` จะถาม Username/Password: ใส่ชื่อ GitHub และใส่
+**token** แทนรหัสผ่าน (GitHub → Settings → Developer settings → Fine-grained tokens → เลือกเฉพาะรีโปนี้
+สิทธิ์ Contents: Read-only) ตอนวาง token จะไม่เห็นตัวอักษรเป็นเรื่องปกติ ห้ามแชร์ token ให้ใคร
+
+อีกทาง: ดาวน์โหลด ZIP จาก GitHub บนคอม
 แล้วส่งเข้า Pi ด้วยคำสั่งบนคอม `scp OBD.zip ชื่อผู้ใช้@deepal-pi.local:`
 จากนั้นบน Pi รัน `sudo apt-get install -y unzip && unzip OBD.zip` แล้วเข้าโฟลเดอร์ที่ได้ และรัน `bash pi/install.sh`
 
@@ -70,13 +74,19 @@ bash pi/install.sh
 
 1. บน iPhone: ตั้งค่า → ฮอตสปอตส่วนบุคคล → เปิด **"เพิ่มความเข้ากันได้สูงสุด"**
    (Maximize Compatibility) เพื่อให้ใช้ 2.4 GHz
-2. เปิด Hotspot ไว้ใกล้ Pi แล้วบน Pi รัน
+2. บน Pi รัน (ทำที่บ้านได้เลย ไม่ต้องเปิด Hotspot คำสั่งนี้แค่บันทึกไว้ ssh จะไม่หลุด)
 
    ```bash
-   sudo nmcli dev wifi connect "ชื่อ Hotspot" password "รหัส Hotspot"
+   sudo nmcli connection add type wifi ifname wlan0 con-name hotspot \
+       ssid "ชื่อ Hotspot" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "รหัส Hotspot"
    ```
 
-Pi จะจำทั้ง WiFi บ้านและ Hotspot แล้วต่อเองตามที่เจอ
+   ชื่อ Hotspot คือชื่อ iPhone (ตั้งค่า → ทั่วไป → เกี่ยวกับ → ชื่อ) ถ้ามีภาษาไทยหรือเครื่องหมาย `'`
+   แนะนำให้เปลี่ยนเป็นภาษาอังกฤษสั้นๆ ก่อน เช่น `NatPhone`
+
+Pi จะจำทั้ง WiFi บ้านและ Hotspot แล้วต่อเองตามที่เจอ ในรถให้เปิดหน้า "ฮอตสปอตส่วนบุคคล"
+ค้างไว้สักครู่ตอนเปิด Pi (iPhone ซ่อน Hotspot ถ้าไม่มีใครต่อและไม่ได้เปิดหน้านี้)
+ssh จาก iPhone ด้วยแอป Termius ไปที่ `deepal-pi.local` ถ้าไม่เจอให้ลอง IP `172.20.10.2` ถึง `172.20.10.14`
 
 ## ขั้นที่ 5: จับคู่กล่อง OBD
 
