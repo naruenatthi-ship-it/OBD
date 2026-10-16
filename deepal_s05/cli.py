@@ -1196,32 +1196,43 @@ def cmd_discover(args):
     ranges = parse_ranges(args.ranges) if args.ranges else \
         [(int(args.start, 16), int(args.end, 16))]
     results = []
-    with connect(args) as elm:
-        try:
-            for header in headers:
-                for did, raw, run in discover_header(elm, header, ranges,
-                                                     args.extended,
-                                                     args.keep_ids):
-                    results.append((header, did, raw, run))
-        except KeyboardInterrupt:
-            print("\nหยุดแล้ว")
+    hidden = 0
+    out = writer = None
+    if args.save:
+        # written as DIDs are found, so a scan cut short (the car switching
+        # itself off) keeps what it found
+        out = open(args.save, "w", newline="", encoding="utf-8")
+        writer = csv.writer(out)
+        writer.writerow(["header", "did", "length", "raw", "cell_like"])
+        out.flush()
+    try:
+        with connect(args) as elm:
+            try:
+                for header in headers:
+                    for did, raw, run in discover_header(elm, header, ranges,
+                                                         args.extended,
+                                                         args.keep_ids):
+                        results.append((header, did, raw, run))
+                        if writer is None:
+                            continue
+                        if did in PRIVATE_DIDS and not args.keep_ids:
+                            hidden += 1
+                            continue
+                        writer.writerow([
+                            header, "%04X" % did, len(raw), raw.hex().upper(),
+                            analysis.describe_cell_run(run) if run else ""])
+                        out.flush()
+            except KeyboardInterrupt:
+                print("\nหยุดแล้ว")
+    finally:
+        if out:
+            out.close()
     print("\nพบ %d DID" % len(results))
     cells = [r for r in results if r[3]]
     if cells:
         print("DID ที่อาจเป็นแรงดันรายเซลล์: " +
               ", ".join("%s:22%04X" % (h, d) for h, d, _, _ in cells))
     if args.save:
-        with open(args.save, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["header", "did", "length", "raw", "cell_like"])
-            hidden = 0
-            for header, did, raw, run in results:
-                if did in PRIVATE_DIDS and not args.keep_ids:
-                    hidden += 1
-                    continue
-                w.writerow([header, "%04X" % did, len(raw),
-                            raw.hex().upper(),
-                            analysis.describe_cell_run(run) if run else ""])
         print("บันทึกไว้ที่ %s" % args.save)
         if hidden:
             print("(ไม่ได้บันทึก DID ที่ระบุตัวรถ เช่น เลข VIN %d รายการ"
