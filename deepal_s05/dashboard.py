@@ -183,6 +183,42 @@ VISUAL_PAGES = {
 }
 
 
+def text_page(name, body):
+    """A text file with a copy-all button and a download link. The page
+    is plain http, where the clipboard API is off, so the copy selects a
+    textarea and uses execCommand."""
+    text = html.escape(body.decode("utf-8", "replace"))
+    quoted = urllib.parse.quote(name)
+    return """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%s</title><style>
+body{font-family:-apple-system,sans-serif;margin:12px;background:#fff;color:#111}
+button,a.b{font-size:18px;padding:12px 16px;margin:0 8px 10px 0;border-radius:10px;
+border:0;background:#0a84ff;color:#fff;text-decoration:none;display:inline-block}
+a.b{background:#555}
+textarea{width:100%%;height:70vh;font:12px ui-monospace,monospace;box-sizing:border-box}
+@media (prefers-color-scheme:dark){body{background:#111;color:#eee}
+textarea{background:#222;color:#eee}}
+</style></head><body>
+<button id="c">คัดลอกทั้งหมด</button>
+<a class="b" href="/files/%s?dl=1">ดาวน์โหลดไฟล์</a>
+<a class="b" href="/files">กลับ</a>
+<div id="m"></div>
+<textarea id="t" readonly>%s</textarea>
+<script>
+document.getElementById('c').onclick = function () {
+  var t = document.getElementById('t');
+  t.removeAttribute('readonly'); t.focus(); t.select();
+  t.setSelectionRange(0, t.value.length);
+  var ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  t.setAttribute('readonly', ''); t.blur();
+  document.getElementById('m').textContent = ok ?
+    'คัดลอกแล้ว ไปวางในแชตได้เลย' : 'คัดลอกเองไม่ได้: แตะค้างในกล่องแล้วเลือก "คัดลอก"';
+};
+</script></body></html>""" % (html.escape(name), quoted, text)
+
+
 def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 car_name="Deepal S05", ir_path=None, car_key="deepal-s05",
                 password=None):
@@ -254,8 +290,12 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 if name.endswith(".html"):  # open saved pages in place
                     self.send_body(body, "text/html; charset=utf-8")
                     return
-                if name.endswith(".txt"):  # digests: read and copy on a phone
-                    self.send_body(body, "text/plain; charset=utf-8")
+                query = urllib.parse.urlparse(self.path).query
+                if name.endswith(".txt") and "dl" not in query:
+                    # digests: one tap to copy on a phone (plain text
+                    # in Safari can only be selected line by line)
+                    self.send_body(text_page(name, body).encode("utf-8"),
+                                   "text/html; charset=utf-8")
                     return
                 self.send_body(body, "application/octet-stream", [
                     ("Content-Disposition",

@@ -160,8 +160,11 @@ def test_dashboard_files_routes(tmp_path):
         body = urllib.request.urlopen(
             base + "/files/drive_20270101.csv").read()
         assert body == b"time,soc\n1,80\n"
-        body = urllib.request.urlopen(base + "/files/survey_digest.txt")
-        assert body.headers["Content-Type"].startswith("text/plain")
+        page = urllib.request.urlopen(
+            base + "/files/survey_digest.txt").read().decode()
+        assert "คัดลอกทั้งหมด" in page and "สรุป" in page
+        body = urllib.request.urlopen(base + "/files/survey_digest.txt?dl=1")
+        assert "attachment" in body.headers["Content-Disposition"]
         assert body.read() == "สรุป".encode()
         for bad in ("/files/secret.txt", "/files/..%2F..%2Fetc%2Fpasswd"):
             with pytest.raises(urllib.error.HTTPError):
