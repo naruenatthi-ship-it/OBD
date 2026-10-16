@@ -70,10 +70,14 @@ class Vehicle:
         return ["%03X" % i for i in range(lo, hi + 1)]
 
 
-# BMS part numbers (F187, prefix match) of known packs. Empty until part
-# numbers have been read from real cars; add entries like
-#   {"part": "XXXXXXXX", "capacity": 56.1, "label": "56.1 kWh LFP"}
-DEEPAL_PACKS = []
+# BMS part numbers (F187, prefix match) of known packs, from real cars.
+# Add entries like {"part": "XXXXXXXX", "capacity": 68.82, "label": ...}
+DEEPAL_PACKS = [
+    # Thai S05 Max, read 2026-10-16 (one car); 404.1 V at 3.366 V/cell
+    # suggests 120 cells in series
+    {"part": "2101210-EM01", "capacity": 56.1,
+     "label": "56.1 kWh LFP (S05 Max ไทย)"},
+]
 
 
 def deepal_s05(**_):
