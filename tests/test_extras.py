@@ -169,3 +169,11 @@ def test_serve_refuses_open_host_without_password(monkeypatch):
     from deepal_s05 import cli
     monkeypatch.delenv("OBD_WEB_PASSWORD", raising=False)
     assert cli.main(["serve", "--host", "0.0.0.0"]) == 2
+
+
+def test_canfind_odometer():
+    rows = {"3F0": {"id": "3F0", "sample": "00 06 87 B1 00 00 00 00"},
+            "120": {"id": "120", "sample": "12 34"}}
+    hits = canscan.find_value(rows, 42795, 1)
+    assert ("3F0", 1, 3, "big", 10, 42795.3) in hits
+    assert all(h[0] == "3F0" for h in hits)

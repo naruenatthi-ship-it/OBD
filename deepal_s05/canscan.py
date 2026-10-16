@@ -128,3 +128,23 @@ def compare(a, b):
         return not x["moving_bytes"] and x["sample"] != y["sample"]
     changed = sorted(k for k in set(a) & set(b) if differs(a[k], b[k]))
     return {"only_a": only_a, "only_b": only_b, "changed": changed}
+
+
+def find_value(rows, target, tolerance):
+    """Where a number (e.g. the odometer) could sit in broadcast frames:
+    every 2-4 byte window of each id's sample, big and little endian,
+    read as is, x10 and x100 (0.1 / 0.01 units), within `tolerance` of
+    `target`. -> [(id, first byte, length, order, scale, value)]"""
+    hits = []
+    for r in rows.values() if isinstance(rows, dict) else rows:
+        data = bytes.fromhex(r["sample"].replace(" ", ""))
+        for n in (2, 3, 4):
+            for k in range(len(data) - n + 1):
+                chunk = data[k:k + n]
+                for order in ("big", "little"):
+                    raw = int.from_bytes(chunk, order)
+                    for scale in (1, 10, 100):
+                        value = raw / scale
+                        if abs(value - target) <= tolerance:
+                            hits.append((r["id"], k, n, order, scale, value))
+    return hits

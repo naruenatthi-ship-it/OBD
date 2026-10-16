@@ -1614,6 +1614,23 @@ def cmd_serve(args):
     return 0
 
 
+def cmd_canfind(args):
+    from . import canscan
+    hits = canscan.find_value(canscan.load(args.file), args.value,
+                              args.tolerance)
+    if not hits:
+        print("ไม่พบค่าใกล้ %g (±%g) ใน %s" % (args.value, args.tolerance,
+                                            args.file))
+        return 1
+    print("id   ไบต์เริ่ม ยาว  ลำดับ    หาร   ค่า")
+    for can_id, k, n, order, scale, value in hits:
+        print("%s  %8d %4d  %-6s %5d   %g" % (can_id, k, n, order, scale,
+                                            value))
+    print("\nเจอหลายที่ได้ ตัวจริงจะเพิ่มตามระยะทางเมื่อขับ: ขับสักนิดแล้ว canscan"
+          " ใหม่ แล้วดูว่าค่าไหนขยับตาม")
+    return 0
+
+
 def cmd_soh(args):
     from . import soh
     ms, rated, table = soh.report(args.dir, args.capacity)
@@ -2169,6 +2186,13 @@ def build_parser():
                     help="ชื่อตัวแปรที่เก็บรหัสผ่านหน้าเว็บ")
     sv.set_defaults(func=cmd_serve)
 
+    cf = sub.add_parser("canfind",
+                        help="ค้นหาตัวเลข (เช่น เลขไมล์) ในผล canscan")
+    cf.add_argument("file")
+    cf.add_argument("value", type=float, help="ค่าที่ค้น เช่น เลขไมล์บนหน้าปัด")
+    cf.add_argument("--tolerance", type=float, default=50)
+    cf.set_defaults(func=cmd_canfind)
+
     so = sub.add_parser("soh", help="วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)")
     so.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
     so.set_defaults(func=cmd_soh)
@@ -2213,7 +2237,7 @@ def main(argv=None):
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
                cmd_visual, cmd_predict, cmd_clean, cmd_soh,
-               cmd_cancompare, cmd_cost, cmd_serve)
+               cmd_cancompare, cmd_cost, cmd_serve, cmd_canfind)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

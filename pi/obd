@@ -54,6 +54,7 @@ usage() {
   cost             ค่าไฟการชาร์จรายเดือน
   canscan [ชื่อ]    ดักฟัง CAN ที่รถกระจายเอง (ฟังอย่างเดียว ~3 นาที) เช่น obd canscan charging
   cancompare       เทียบ canscan สองครั้งล่าสุด
+  canfind ตัวเลข    ค้นตัวเลขในผล canscan ล่าสุด เช่น obd canfind 42800 (เลขไมล์หน้าปัด)
   telegram TOKEN   ตั้งแจ้งเตือนผ่าน Telegram (token จาก @BotFather)
   telegram         หาเลข chat / ส่งข้อความทดสอบ
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
@@ -400,6 +401,15 @@ do_command() {
                 --dir "$DATA" "$@" ;;
         canscan)
             run canscan --save "$DATA/canscan_${1:-scan}_$STAMP.csv" ;;
+        canfind)
+            local last
+            last=$(ls -t "$DATA"/canscan_*.csv 2>/dev/null | head -1)
+            if [ -z "$last" ] || [ $# -lt 1 ]; then
+                echo "ต้อง obd canscan ก่อน แล้ว obd canfind เลขไมล์บนหน้าปัด"
+                return 1
+            fi
+            cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 canfind \
+                "$last" "$@" ;;
         cancompare)
             local a b
             a=$(ls -t "$DATA"/canscan_*.csv 2>/dev/null | sed -n 2p)
