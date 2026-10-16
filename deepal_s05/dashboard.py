@@ -231,7 +231,8 @@ def digest_page(data_dir, query):
     from . import survey
     q = urllib.parse.parse_qs(query)
     all_rows = "all" in q
-    text, newest = survey.digest_text(data_dir, all_rows)
+    since = q["since"][0] if "since" in q else None
+    text, newest = survey.digest_text(data_dir, all_rows, since=since)
     if text is None:
         text = ("ยังไม่มีผล survey" if not newest else
                 "ไม่มีผลใหม่ตั้งแต่ส่งครั้งก่อน (%s)" % newest)

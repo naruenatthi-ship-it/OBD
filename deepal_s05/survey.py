@@ -282,14 +282,16 @@ def digest(path, since=""):
     return out, newest
 
 
-def digest_text(data_dir, all_rows=False, path=None):
+def digest_text(data_dir, all_rows=False, path=None, since=None):
     """The digest as one text: what is new since the last one sent (all
     of it with `all_rows`, or of a scan file `path`). Returns (text or
     None when there is nothing new, time of the newest row)."""
     path = path or os.path.join(data_dir, RESULTS_FILE)
     if not os.path.exists(path):
         return None, ""
-    since = ""
+    if since is not None:  # asked for: from this time on
+        all_rows = True
+    since = since or ""
     if not all_rows and path.endswith(RESULTS_FILE):
         try:
             with open(os.path.join(data_dir, DIGEST_MARK),

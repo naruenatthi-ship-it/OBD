@@ -180,6 +180,9 @@ def test_dashboard_files_routes(tmp_path):
         assert "ไม่มีผลใหม่" in page
         page = urllib.request.urlopen(base + "/digest?all=1").read().decode()
         assert "F1F0 8D" in page
+        page = urllib.request.urlopen(
+            base + "/digest?since=2026-10-16T19:00").read().decode()
+        assert "F1F0 8D" in page and "ตั้งแต่ 2026-10-16T19:00" in page
         trends = urllib.request.urlopen(base + "/trends").read().decode()
         assert "ยังไม่มีประวัติ" in trends
         assert json.loads(urllib.request.urlopen(base + "/data").read())[
