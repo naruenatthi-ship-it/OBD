@@ -1273,7 +1273,11 @@ def cmd_dashboard(args):
 
 # DIDs that identify the car or its parts (VIN, serial numbers); left out of
 # saved scans and recordings unless --keep-ids, so files can be shared.
-PRIVATE_DIDS = {0xF190, 0xF18C}  # VIN, ECU serial number
+# DIDs that identify the car or its owner, hidden unless --keep-ids:
+# VIN, ECU serial number, and on the Deepal S05 telematics box (706) the
+# modem IMEI (F1F2), SIM card number (F1F3) and a record that may hold
+# the position (F213)
+PRIVATE_DIDS = {0xF190, 0xF18C, 0xF1F2, 0xF1F3, 0xF213}
 
 
 def parse_ranges(text):
@@ -1317,7 +1321,7 @@ def discover_header(elm, header, ranges, extended, keep_ids=False):
                 if len(text) > 72:
                     text = text[:72] + " ..."
                 if did in PRIVATE_DIDS and not keep_ids:
-                    text = "(ซ่อน: เลข VIN/serial ใส่ --keep-ids ถ้าต้องการดู)"
+                    text = "(ซ่อน: เลข VIN/serial/IMEI/ซิม ใส่ --keep-ids ถ้าต้องการดู)"
                 print("%s 22%04X  %3d ไบต์  %s" % (header, did, len(raw),
                                                   text))
                 if run:
@@ -1376,7 +1380,7 @@ def cmd_discover(args):
     if args.save:
         print("บันทึกไว้ที่ %s" % args.save)
         if hidden:
-            print("(ไม่ได้บันทึก DID ที่ระบุตัวรถ เช่น เลข VIN %d รายการ"
+            print("(ไม่ได้บันทึก DID ที่ระบุตัวรถ เช่น เลข VIN, IMEI, เลขซิม %d รายการ"
                   " ใส่ --keep-ids ถ้าต้องการ)" % hidden)
     return 0
 
@@ -1803,7 +1807,7 @@ def build_parser():
                    help="เข้าโหมดวินิจฉัยขยาย (10 03) ก่อนอ่าน ใช้ตอนจอดเท่านั้น")
     d.add_argument("--save", help="บันทึกผลเป็นไฟล์ CSV")
     d.add_argument("--keep-ids", action="store_true",
-                   help="บันทึก DID ที่ระบุตัวรถ (เลข VIN, serial) ไว้ในไฟล์ด้วย")
+                   help="บันทึก DID ที่ระบุตัวรถ (เลข VIN, serial, IMEI, ซิม) ไว้ในไฟล์ด้วย")
     d.set_defaults(func=cmd_discover)
 
     sd = sub.add_parser("scandiff",
