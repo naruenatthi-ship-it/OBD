@@ -159,6 +159,9 @@ class Survey:
                 if raw is not None:
                     self.state["found"] += 1
                     self._write(task["header"], did, raw)
+                    # a power cut must not send the survey back over
+                    # DIDs already written down (rows came out twice)
+                    self.save()
         finally:
             self._timer(elm, NORMAL_ST)
             self.state["checked"] += max(n, 0)

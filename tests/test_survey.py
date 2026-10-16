@@ -64,6 +64,20 @@ def test_survey_resumes_where_it_stopped(tmp_path):
     assert len(elm.asked) == 2 * 18     # every DID asked exactly once
 
 
+def test_power_cut_after_a_hit_does_not_write_it_twice(tmp_path):
+    clock = Tick()
+    s = survey.Survey(str(tmp_path), clock=clock)
+    s.start(["754"], [(0xF190, 0xF1AF)])
+    elm = Elm({("754", 0xF193): b"\x01", ("754", 0xF195): b"\x02"})
+    s.run(elm, 1.0)                     # no flush: the power went
+    s2 = survey.Survey(str(tmp_path), clock=clock)
+    assert s2.load()
+    while s2.run(elm, 100):
+        pass
+    rows = list(csv.DictReader(open(tmp_path / survey.RESULTS_FILE)))
+    assert [r["did"] for r in rows] == ["F193", "F195"]
+
+
 def test_survey_puts_back_dids_when_the_adapter_is_gone(tmp_path):
     s = survey.Survey(str(tmp_path), clock=Tick())
     s.start(["7A1"], [(0x0000, 0x00FF)])
