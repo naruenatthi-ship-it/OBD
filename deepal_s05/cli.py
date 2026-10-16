@@ -1468,6 +1468,72 @@ def cmd_record(args):
     return 0
 
 
+def _eco_tag(note, path):
+    """AC state from the recording's note (or file name): off / on / as-is."""
+    text = (note or os.path.basename(path)).lower()
+    if "off" in text or "ปิด" in text:
+        return "แอร์ปิด"
+    if "on" in text or "เปิด" in text:
+        return "แอร์เปิด"
+    return note or os.path.basename(path)
+
+
+def cmd_eco(args):
+    import glob
+    files = args.files or sorted(glob.glob("rec_*.csv"))
+    groups = {}
+    for path in files:
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(snapshot.no_nul(f)))
+        except OSError as e:
+            print("อ่าน %s ไม่ได้: %s" % (path, e))
+            continue
+        if rows:
+            tag = _eco_tag(rows[0].get("note"), path)
+            groups.setdefault(tag, []).extend(rows)
+    table = analysis.eco_table(groups, window_s=args.window)
+    if not any(table.values()):
+        print("ไม่พบช่วงที่ความเร็วนิ่งนาน %d วินาที (ต้องบันทึกด้วย `obd rec ... watch`"
+              " แล้วคงความเร็วให้นิ่ง)" % args.window)
+        return 1
+    tags = sorted(table)
+    bins = sorted({b for t in table.values() for b in t})
+    print("kWh/100 km ตอนความเร็วนิ่ง (ฝั่งแบต · ความเร็วตามมาตรวัด)"
+          " · ช่วงที่กำลังเร่ง/ไต่ความเร็วไม่นับ\n")
+    print("%-9s" % "km/h" + "".join("%-26s" % t for t in tags))
+    for b in bins:
+        cells = []
+        for t in tags:
+            r = table[t].get(b)
+            if r is None:
+                cells.append("%-26s" % "-")
+            elif b == 0:
+                cells.append("%-26s" % ("จอด %.2f kW (%ds)" % (r["kw"], r["sec"])))
+            else:
+                cells.append("%-26s" % ("%.1f (%.1f kW, %ds)" % (
+                    r["kwh_100"], r["kw"], r["sec"])))
+        print("%-9s" % ("จอด" if b == 0 else b) + "".join(cells))
+    off, on = table.get("แอร์ปิด"), table.get("แอร์เปิด")
+    if off and on:
+        print("\nแอร์กินเพิ่ม (เปิด − ปิด ที่ความเร็วเดียวกัน)")
+        for b in bins:
+            if b in off and b in on:
+                dkw = on[b]["kw"] - off[b]["kw"]
+                if b == 0:
+                    print("  จอด: %+.2f kW" % dkw)
+                else:
+                    d100 = on[b]["kwh_100"] - off[b]["kwh_100"]
+                    print("  %3d km/h: %+.2f kW = %+.1f kWh/100 km (%+.0f%%)" % (
+                        b, dkw, d100, d100 / off[b]["kwh_100"] * 100))
+    else:
+        print("\nอยากเทียบแอร์: บันทึกสองไฟล์ ตั้งชื่อให้มีคำว่า off / on"
+              " (เช่น `obd rec acoff 8 watch` และ `obd rec acon 8 watch`)")
+    print("\nข้อควรระวัง: ถนน ลม ความชัน อุณหภูมิภายนอกต้องใกล้เคียงกันทั้งสองชุด"
+          " · ตัวเลขช่วงสั้น ถือเป็น EXPERIMENTAL")
+    return 0
+
+
 def cmd_trip(args):
     import glob
     files = args.files or sorted(glob.glob("drive_*.csv"))
@@ -2037,6 +2103,15 @@ def build_parser():
     tp.add_argument("--save", help="บันทึกสรุปเป็น CSV")
     tp.set_defaults(func=cmd_trip)
 
+    ep = sub.add_parser("eco",
+                        help="แยก kWh/100 km ตามความเร็วนิ่งและแอร์เปิด/ปิด"
+                             " จากไฟล์ rec_*.csv (ไม่ต้องใส่ --port)")
+    ep.add_argument("files", nargs="*",
+                    help="ไฟล์บันทึก (ค่าเริ่มต้น rec_*.csv ในโฟลเดอร์นี้)")
+    ep.add_argument("--window", type=int, default=30,
+                    help="ความเร็วต้องนิ่งนานกี่วินาทีถึงนับ (ค่าเริ่มต้น 30)")
+    ep.set_defaults(func=cmd_eco)
+
     e = sub.add_parser("ecus", help="สแกนหา ECU ทั้งหมดในรถ (อ่านอย่างเดียว)")
     e.add_argument("--start", help="header แรก (ค่าเริ่มต้น 700 หรือ 00 สำหรับ 29 บิต)")
     e.add_argument("--end", help="header สุดท้าย (ค่าเริ่มต้น 7FF หรือ FF)")
@@ -2316,7 +2391,7 @@ def main(argv=None):
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
                cmd_visual, cmd_predict, cmd_clean, cmd_soh,
                cmd_cancompare, cmd_cost, cmd_serve, cmd_canfind,
-               cmd_survey)
+               cmd_survey, cmd_eco)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

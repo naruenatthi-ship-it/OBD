@@ -63,6 +63,7 @@ usage() {
   telegram TOKEN   ตั้งแจ้งเตือนผ่าน Telegram (token จาก @BotFather)
   telegram         หาเลข chat / ส่งข้อความทดสอบ
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
+  eco              แยก kWh/100 km ตามความเร็วนิ่ง + แอร์เปิด/ปิด (จากไฟล์ rec_*.csv)
   pair             จับคู่กล่อง OBD ใหม่
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
   web              บอกที่อยู่หน้า dashboard
@@ -290,6 +291,7 @@ do_command() {
                 --save "$DATA/scan_${header//,/_}_$STAMP.csv" "$@" ;;
         live)    run live "$@" ;;
         trip)    cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 trip "$@" ;;
+        eco)     cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 eco "$@" ;;
         rec)
             local name=${1:-drive} minutes=${2:-20} scan
             case "${3:-}" in

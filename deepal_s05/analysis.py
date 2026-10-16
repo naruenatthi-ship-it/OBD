@@ -422,37 +422,46 @@ def _odo_km(samples):
     return odo[-1] - odo[0] if len(odo) >= 2 else None
 
 
+def _drive_sample(row):
+    """One drive-log row (dict) -> {t, time, speed, power, ...} or None when
+    the row has no usable time, speed or battery power."""
+    import datetime
+    try:
+        t = datetime.datetime.fromisoformat(row["time"]).timestamp()
+    except (KeyError, ValueError):
+        return None
+    speed = _num(row.get("speed_kmh"))
+    rpm = _num(row.get("motor_rpm"))
+    if rpm is None and row.get("did_7A7_FD07"):  # raw, from record
+        rpm = int(row["did_7A7_FD07"], 16) - 20000
+    if speed is None and rpm is not None:
+        from .pids import RPM_PER_KMH
+        speed = abs(rpm) / RPM_PER_KMH
+    power = _num(row.get("pack_power_kw"))
+    if power is None and _num(row.get("pack_current")) is not None \
+            and _num(row.get("pack_voltage")) is not None:
+        power = _num(row["pack_current"]) * _num(row["pack_voltage"]) / 1000
+    if speed is None or power is None:
+        return None
+    return {"t": t, "time": row["time"], "speed": speed, "power": power,
+            "odo": _num(row.get("odometer_km")),
+            "soc": _num(row.get("soc")),
+            "motor": _num(row.get("motor_temp")),
+            "inverter": _num(row.get("inverter_temp")),
+            "batt": _num(row.get("batt_temp_max"))}
+
+
 def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
     """Split drive-log rows (dicts from drive_*.csv) into trips at gaps of
     more than `gap_s` seconds and total distance, energy and peaks.
     Energy is battery-side (V x I, positive = discharge), so it includes
     the air conditioning; regen is the energy that went back in."""
-    import datetime
     trips, cur, prev = [], None, None
     for row in rows:
-        try:
-            t = datetime.datetime.fromisoformat(row["time"]).timestamp()
-        except (KeyError, ValueError):
+        sample = _drive_sample(row)
+        if sample is None:
             continue
-        speed = _num(row.get("speed_kmh"))
-        rpm = _num(row.get("motor_rpm"))
-        if rpm is None and row.get("did_7A7_FD07"):  # raw, from record
-            rpm = int(row["did_7A7_FD07"], 16) - 20000
-        if speed is None and rpm is not None:
-            from .pids import RPM_PER_KMH
-            speed = abs(rpm) / RPM_PER_KMH
-        power = _num(row.get("pack_power_kw"))
-        if power is None and _num(row.get("pack_current")) is not None \
-                and _num(row.get("pack_voltage")) is not None:
-            power = _num(row["pack_current"]) * _num(row["pack_voltage"]) / 1000
-        if speed is None or power is None:
-            continue
-        sample = {"t": t, "time": row["time"], "speed": speed, "power": power,
-                  "odo": _num(row.get("odometer_km")),
-                  "soc": _num(row.get("soc")),
-                  "motor": _num(row.get("motor_temp")),
-                  "inverter": _num(row.get("inverter_temp")),
-                  "batt": _num(row.get("batt_temp_max"))}
+        t, speed, power = sample["t"], sample["speed"], sample["power"]
         if cur is None or t - prev["t"] > gap_s:
             cur = {"start": row["time"], "samples": []}
             trips.append(cur)
@@ -487,3 +496,52 @@ def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
             "km_odometer": _odo_km(s),
             "batt_max": peak("batt")})
     return out
+
+
+def steady_windows(samples, window_s=30, spread_kmh=6, max_step_s=10):
+    """Stretches of a drive log where the speed held steady (max - min within
+    `spread_kmh`, no gap over `max_step_s`) for at least `window_s` seconds.
+    Returns [{kmh, kw, sec}] - the speed ramps between them are skipped, so
+    the power is a cruise (or standstill) figure, not an acceleration one."""
+    out, i, n = [], 0, len(samples)
+    while i < n:
+        j, lo, hi = i, samples[i]["speed"], samples[i]["speed"]
+        while j + 1 < n and samples[j + 1]["t"] - samples[j]["t"] <= max_step_s:
+            nlo = min(lo, samples[j + 1]["speed"])
+            nhi = max(hi, samples[j + 1]["speed"])
+            if nhi - nlo > spread_kmh:
+                break
+            lo, hi, j = nlo, nhi, j + 1
+        sec = samples[j]["t"] - samples[i]["t"]
+        if j > i and sec >= window_s:
+            win = samples[i:j + 1]
+            out.append({"kmh": sum(x["speed"] for x in win) / len(win),
+                        "kw": sum(x["power"] for x in win) / len(win),
+                        "sec": sec})
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def eco_table(groups, window_s=30, spread_kmh=6):
+    """groups: {tag: [drive-log rows of one file, ...]} -> {tag: {bin: {sec,
+    kw, kmh, kwh_100}}}. Speeds are binned to the nearest 10 km/h (bin 0 =
+    standing still, where kwh_100 is None because no distance is covered)."""
+    table = {}
+    for tag, rows in groups.items():
+        samples = [x for x in map(_drive_sample, rows) if x]
+        samples.sort(key=lambda x: x["t"])
+        acc = {}
+        for w in steady_windows(samples, window_s, spread_kmh):
+            b = 0 if w["kmh"] < 3 else int(round(w["kmh"] / 10.0)) * 10
+            a = acc.setdefault(b, {"sec": 0.0, "kw_s": 0.0, "kmh_s": 0.0})
+            a["sec"] += w["sec"]
+            a["kw_s"] += w["kw"] * w["sec"]
+            a["kmh_s"] += w["kmh"] * w["sec"]
+        table[tag] = {}
+        for b, a in sorted(acc.items()):
+            kw, kmh = a["kw_s"] / a["sec"], a["kmh_s"] / a["sec"]
+            table[tag][b] = {"sec": a["sec"], "kw": kw, "kmh": kmh,
+                             "kwh_100": kw / kmh * 100 if b else None}
+    return table
