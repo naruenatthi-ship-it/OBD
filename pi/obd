@@ -41,6 +41,8 @@ usage() {
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
   web              บอกที่อยู่หน้า dashboard
   update           อัปเดตโปรแกรมจาก GitHub (ต้องต่อเน็ต)
+  off              ปิดเครื่อง Pi (รอไฟเขียวดับก่อนถอดสาย)
+  reboot           รีสตาร์ท Pi
   อื่นๆ            ส่งต่อให้โปรแกรมตรงๆ เช่น obd balance, obd record --note test
 EOF
 }
@@ -204,6 +206,12 @@ do_command() {
             cd "$src" && git pull && bash pi/install.sh &&
                 as_root "$SYSTEMCTL" restart deepal-obd &&
                 echo "อัปเดตเสร็จแล้ว" ;;
+        off|shutdown)
+            echo "กำลังปิดเครื่อง รอไฟเขียวบน Pi ดับ (ประมาณ 20 วินาที) แล้วค่อยถอดสายไฟ"
+            as_root /sbin/shutdown -h now ;;
+        reboot)
+            echo "กำลังรีสตาร์ท รอ 1-2 นาทีแล้วค่อยต่อใหม่"
+            as_root /sbin/shutdown -r now ;;
         help|-h|--help) usage ;;
         "")      menu ;;
         *)       run "$cmd" "$@" ;;
@@ -216,7 +224,7 @@ menu() {
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
-                 "wifi  ดู WiFi ที่จำไว้"
+                 "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
                  "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"
