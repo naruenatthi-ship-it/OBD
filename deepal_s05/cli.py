@@ -1492,6 +1492,20 @@ def cmd_visual(args):
     return 0
 
 
+def cmd_predict(args):
+    from . import predict
+    findings = predict.assess(args.dir)
+    print("เตือนล่วงหน้า: เทียบกับปกติของรถคันนี้ และแนวโน้มที่กำลังไป\n")
+    for f in findings:
+        print("%s %-34s %s" % (predict.LEVEL_ICON[f.level], f.part, f.summary))
+    print("\nต้องมีข้อมูลสะสม 3–4 สัปดาห์ถึงจะรู้ปกติของรถ และ 2–3 เดือนถึงเห็น"
+          "แนวโน้มชัด · ไม่ใช่การวินิจฉัย ถ้าแดงให้ศูนย์ตรวจ")
+    if args.out:
+        predict.write_predict(args.dir, args.out)
+        print("สร้างหน้า %s แล้ว" % args.out)
+    return 0
+
+
 def cmd_correlate(args):
     from . import reverse
     rows, did_keys = reverse.read_record(args.file)
@@ -1954,6 +1968,13 @@ def build_parser():
         vp.add_argument("--out", default=out)
         vp.set_defaults(func=cmd_visual, kind=kind)
 
+    pr = sub.add_parser("predict",
+                        help="เตือนล่วงหน้า: ชิ้นไหนเริ่มผิดปกติ/จะถึงเกณฑ์เมื่อไร"
+                             " (จากไฟล์ที่บันทึกไว้)")
+    pr.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    pr.add_argument("--out", help="สร้างหน้า HTML ด้วย")
+    pr.set_defaults(func=cmd_predict)
+
     nt = sub.add_parser("notify-test",
                         help="ส่งข้อความทดสอบไป ntfy/Telegram"
                              " (และบอกเลข chat ของ Telegram)")
@@ -1978,7 +1999,7 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
-               cmd_visual)
+               cmd_visual, cmd_predict)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

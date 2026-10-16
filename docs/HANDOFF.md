@@ -26,6 +26,10 @@
   ไม่ให้อ่าน DID นั้น ส่วนที่เหลือจะเป็น "แยกไม่ได้" (ต้องเดาความยาวเองจากค่าดิบ)
 - หน้า `/topology`, `/dyno`, `/charge`, `/freeze` + `obd topo/dyno/chargecurve` (ลองกับข้อมูลจำลองเท่านั้น)
   · `/files/*.html` เปิดในเบราว์เซอร์แทนดาวน์โหลดแล้ว
+- `obd predict` / `/health` (เตือนล่วงหน้า, `deepal_s05/predict.py`): autopilot รันหลังรถดับทุกครั้งและแจ้งเตือน
+  เมื่อมีชิ้นส่วนเปลี่ยนเป็น 🟡/🔴 · ลองกับข้อมูลจำลองเท่านั้น · ข้อสงสัย:
+  - แบต 12V ใช้เกณฑ์ 12.2 V ตามแบตตะกั่ว ถ้าแบต 12V ของ Deepal เป็นลิเธียมต้องปรับเกณฑ์
+  - ข้อมูล 12V ตอนกลางคืนจะมีก็ต่อเมื่อ Pi ยังมีไฟตอนรถหลับ (ตอนนี้รถตัดไฟแล้ว Pi ดับ → ข้อนี้น่าจะ ⚪ ตลอด)
 - `obd telegram TOKEN` / `obd telegram`: บันทึก `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` ลง
   `/etc/default/deepal-obd` (chmod 640) หาเลขแชตจาก getUpdates ส่งข้อความทดสอบ แล้ว restart บริการ
   · ยังไม่เคยลองกับบอทจริง (ในเทสต์ใช้ API ปลอม) · ต้อง `obd update` ก่อน
@@ -54,7 +58,7 @@
 
 ## งานค้าง (เรียงตามความสำคัญ)
 
-0. **ลองของใหม่กับรถจริง** (หลัง `obd update`): `obd freeze` (ดูภาพนิ่ง P1B27-05 ที่ BMS), `obd topo`, เปิด `/dyno`
+0. **ลองของใหม่กับรถจริง** (หลัง `obd update`): `obd predict`, `obd freeze` (ดูภาพนิ่ง P1B27-05 ที่ BMS), `obd topo`, เปิด `/dyno`
    (ใช้ไฟล์ rec_drive เดิม) และ `/charge` (ต้องมีไฟล์ charge_ ก่อน)
 1. **หา OBC**:
    - รอผล scan รอบที่ทำงาน
@@ -86,6 +90,7 @@
 | `deepal_s05/cli.py` | คำสั่งทั้งหมด (check, health, dtc, ecus, discover, record, trip, dashboard, autopilot…) |
 | `deepal_s05/dashboard.py` | หน้าเว็บ :8000 (แท็บเซลล์/อุณหภูมิ/IR/ข้อมูลแพ็ก, `/files`) |
 | `deepal_s05/alerts.py` | เกณฑ์เตือน + ส่งแจ้งเตือน (ntfy, Telegram, `multi_sender`, `Notifier` กันส่งซ้ำ) |
+| `deepal_s05/predict.py` | เตือนล่วงหน้า: แนวโน้ม + เทียบปกติของรถคันนี้ แยก session จาก drive_*.csv |
 | `deepal_s05/visual.py` | หน้าแผนผัง ECU, ไดโน + แผนที่ประสิทธิภาพ, กราฟชาร์จเทียบ SOC, ภาพนิ่งโค้ด (สร้างจากไฟล์) |
 | `deepal_s05/autopilot.py` | service อัตโนมัติบน Pi (อ่านเมื่อรถ READY, checkup, แจ้งเตือน ntfy) |
 | `deepal_s05/analysis.py` | correlate, trip_summaries |

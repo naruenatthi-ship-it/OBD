@@ -33,6 +33,7 @@ usage() {
   freeze           อ่านภาพนิ่งตอนเกิดโค้ด (freeze frame) ว่ารถทำอะไรอยู่ตอนตั้งโค้ด
   dyno             ไดโนจำลอง + แผนที่ประสิทธิภาพมอเตอร์ จากไฟล์บันทึกขับ
   chargecurve      กราฟการชาร์จเทียบ SOC จากไฟล์ charge_
+  predict          เตือนล่วงหน้า: ชิ้นไหนเริ่มผิดปกติ/จะถึงเกณฑ์เมื่อไร (/health)
   scan HEADER [ช่วง]  สแกน DID เช่น obd scan 7A7 0100-01FF (ค่าเริ่มต้น F100-F3FF)
   live             ดูค่าสดในหน้าจอ (Ctrl+C เพื่อหยุด)
   rec [ชื่อ] [นาที]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
@@ -181,6 +182,10 @@ do_command() {
                 echo "ดูเป็นตาราง: http://${ip:-deepal-pi.local}:8000/freeze"
             } ;;
         dyno)        page dyno dyno.html /dyno ;;
+        predict)
+            cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 predict \
+                --dir "$DATA" --out "$DATA/health.html" &&
+                echo "ดูแบบมีกราฟ: http://$(hostname -I 2>/dev/null | awk '{print $1}'):8000/health" ;;
         chargecurve) page chargecurve charge_curve.html /charge ;;
         scan)
             if [ $# -lt 1 ]; then
@@ -332,6 +337,7 @@ menu() {
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
                  "topo  แผนผัง ECU ทั้งคัน" "freeze  ภาพนิ่งตอนเกิดโค้ด"
                  "dyno  ไดโน + แผนที่ประสิทธิภาพ" "chargecurve  กราฟการชาร์จ"
+                 "predict  เตือนล่วงหน้า"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
                  "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"

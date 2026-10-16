@@ -205,10 +205,24 @@ class Autopilot:
             return 1.0
         return self.interval
 
+    def run_predict(self):
+        """After each drive or charge: early warnings that are new or got
+        worse go out through the notifier (once, remembered on disk)."""
+        from . import predict
+        try:
+            findings = predict.assess(self.data_dir)
+            if self.notifier:
+                predict.notify_changes(findings,
+                                       self.path("predict_state.json"),
+                                       self.notifier.send)
+        except Exception:  # a broken file must not stop the logging
+            traceback.print_exc()
+
     def asleep_round(self, now, v12):
         if self.awake_since is not None:
             self.awake_since = None
             self.close_drive_log()
+            self.run_predict()
         if self.last_rest_log is None or \
                 now - self.last_rest_log >= self.rest_log_every:
             month = datetime.datetime.fromtimestamp(now).strftime("%Y%m")

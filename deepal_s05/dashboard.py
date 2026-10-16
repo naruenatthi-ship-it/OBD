@@ -118,7 +118,8 @@ def files_page(data_dir):
             '<h1>ไฟล์ข้อมูล</h1><p><a href="/">กลับหน้าหลัก</a> · '
             '<a href="/trends">กราฟแนวโน้ม</a> · '
             '<a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · '
-            '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a>'
+            '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · '
+            '<a href="/health">เตือนล่วงหน้า</a>'
             '</p><ul>%s</ul></body>'
             % (rows or "<li>ยังไม่มีไฟล์</li>"))
 
@@ -134,11 +135,17 @@ def read_cell_ir(path):
         return {}
 
 
+def _health_page(data_dir):
+    from . import predict
+    return predict.predict_html(predict.assess(data_dir))
+
+
 # scanner-style pages built on request from the files in data_dir
 VISUAL_PAGES = {
     "/topology": lambda v, d, car: v.topology_html(v.load_topology(d), car),
     "/dyno": lambda v, d, car: v.dyno_html(v.drive_files(d)),
     "/charge": lambda v, d, car: v.charge_curve_html(v.charge_files(d)),
+    "/health": lambda v, d, car: _health_page(d),
     "/freeze": lambda v, d, car: v.freeze_html(
         (v.freeze_files(d) or [None])[-1]),
 }
@@ -319,7 +326,7 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
 <header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
-<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a></nav></header>
+<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a></nav></header>
 <div class="alerts" id="alerts"></div>
 <div class="summary" id="summary"></div>
 <nav class="tabs" role="tablist" aria-label="รายละเอียด">
