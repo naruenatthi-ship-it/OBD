@@ -215,9 +215,10 @@ vps() {
             }
             pw=$(python3 -c 'import secrets; print(secrets.token_urlsafe(9))')
             echo "$pw" | vps_ssh "mkdir -p $VPS_DIR/data && umask 077 && cat > $VPS_DIR/web_password"
-            vps_ssh "(crontab -l 2>/dev/null | grep -v vps-serve.sh; echo '@reboot sh \$HOME/$VPS_DIR/app/pi/vps-serve.sh $port') | crontab -"
             echo "==> ส่งข้อมูลครั้งแรก (อาจนานหลายนาทีถ้าไฟล์เยอะ)"
             vps_sync || return 1
+            # keeps the VPS's other cron jobs; refuses if it cannot read them
+            vps_ssh "sh $VPS_DIR/app/pi/vps-cron.sh $port"
             sed "s/@USER@/$(id -un)/" "$APP/pi/deepal-vps-sync.service" |
                 as_root tee /etc/systemd/system/deepal-vps-sync.service >/dev/null
             as_root cp "$APP/pi/deepal-vps-sync.timer" /etc/systemd/system/
