@@ -645,7 +645,7 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
         if did not in lengths:
             try:
                 lengths[did] = len(elm.read_did(header, did))
-            except (NoData, NegativeResponse):
+            except ElmError:  # no data, refused or timed out
                 sig = by_did.get(did)
                 lengths[did] = sig.min_len if sig else None
         return lengths[did]
@@ -653,6 +653,7 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
     out = []
     for code in codes:
         item = {"header": header, "code": code, "records": []}
+        print("  อ่านภาพนิ่ง %s %s ..." % (header, code), file=sys.stderr)
         try:
             msg = elm.read_snapshot(header, dtc.code_bytes(code))
         except NegativeResponse as e:
@@ -663,7 +664,16 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
             item["error"] = "ไม่ตอบ (%s)" % e
             out.append(item)
             continue
-        snap = dtc.parse_snapshot(msg, length_of)
+        except ElmError as e:  # timeout: skip this code, keep going
+            item["error"] = "ไม่ตอบในเวลาที่รอ (%s)" % e
+            out.append(item)
+            continue
+        try:
+            snap = dtc.parse_snapshot(msg, length_of)
+        except ValueError as e:
+            item["error"] = "อ่านคำตอบไม่ออก: %s" % msg.hex().upper()
+            out.append(item)
+            continue
         item["status"] = "0x%02X" % snap["status"]
         for rec in snap["records"]:
             values = []

@@ -305,13 +305,13 @@ class Elm327:
                     self.cra_supported = False
         self.header = header
 
-    def request(self, header, payload):
+    def request(self, header, payload, timeout=None):
         """Send one allowed UDS request and return the response messages
         (bytes, starting with the response SID) from the ECU."""
         if not ALLOWED_REQUESTS.match(payload):
             raise ValueError("request %s is not allowed" % payload)
         self.set_header(header)
-        reply = self.command(payload)
+        reply = self.command(payload, timeout=timeout)
         upper = reply.upper()
         if upper.strip() == "?":
             raise ElmError("adapter rejected request")
@@ -331,9 +331,9 @@ class Elm327:
             messages += assemble_isotp(frames)
         return messages, reply
 
-    def _positive(self, header, payload):
+    def _positive(self, header, payload, timeout=None):
         sid = int(payload[:2], 16)
-        messages, reply = self.request(header, payload)
+        messages, reply = self.request(header, payload, timeout)
         for msg in messages:
             if len(msg) >= 3 and msg[0] == 0x7F and msg[1] == sid:
                 if msg[2] == 0x78:  # response pending, real answer follows
@@ -360,8 +360,9 @@ class Elm327:
         """ReadDTCInformation, reportDTCSnapshotRecordByDTCNumber: the
         freeze frame the ECU stored when the DTC was set. Returns the raw
         positive response (59 04 ...). Record 0xFF = all records."""
+        # snapshots can be long multi-frame replies over a slow BLE link
         return self._positive(header, "1904%s%02X" % (
-            bytes(code_bytes).hex().upper(), record))
+            bytes(code_bytes).hex().upper(), record), timeout=8)
 
     def start_session(self, header, extended=True):
         """DiagnosticSessionControl: extended (0x03) or default (0x01)."""

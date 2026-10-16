@@ -97,8 +97,11 @@ class SnapshotElm:
 
     def read_snapshot(self, header, code_bytes, record=0xFF):
         from deepal_s05.elm327 import NegativeResponse
+        from deepal_s05.elm327 import ElmError
         if code_bytes == dtc.code_bytes("P1B53-05"):
             raise NegativeResponse(0x19, 0x31)
+        if code_bytes == dtc.code_bytes("B1414-11"):
+            raise ElmError("timeout waiting for reply to '1904941411FF'")
         return bytes.fromhex("59041B270589" "01" "03" "F229" "1773"
                              "DD01" "0001A2" "F190" "4C4A31")
 
@@ -116,8 +119,9 @@ def test_read_freeze_frames_decodes_known_and_hides_vin():
     from deepal_s05 import cli, vehicles
     elm = SnapshotElm()
     car = vehicles.deepal_s05()
-    out = cli.read_freeze_frames(elm, "7A1", ["P1B27-05", "P1B53-05"],
-                                 car.signals, 56.1)
+    out = cli.read_freeze_frames(elm, "7A1", ["P1B27-05", "P1B53-05",
+                                              "B1414-11"], car.signals, 56.1)
+    assert "ไม่ตอบในเวลา" in out[2]["error"]  # a timeout skips one code
     values = out[0]["records"][0]["values"]
     current = values[0]
     assert current["key"] == car.signal("pack_current").key
