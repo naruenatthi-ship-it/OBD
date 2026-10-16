@@ -31,6 +31,8 @@
 - **Raspberry Pi Zero 2 W** ชื่อ `deepal-pi` ผู้ใช้ `nat` · บน Hotspot iPhone ใช้ IP คงที่ `172.20.10.14`
   dashboard `http://172.20.10.14:8000` · ชื่อ Hotspot มีเครื่องหมาย `’` แบบโค้ง
   · Raspberry Pi OS (Debian trixie) ปิดบลูทูธไว้ตั้งแต่แรก (`rfkill`) `pair.sh`/`install.sh` ปลดให้แล้ว
+  · บทเรียน: เพิ่ม WiFi อื่นแล้ว Pi ค้างอยู่บนวงที่กันอุปกรณ์มองเห็นกัน มือถือเลยหา Pi ไม่เจอ → ใช้ `obd wifi add`
+    (ตั้ง Hotspot priority 10 วงอื่น 5) และเตือนเรื่องนี้ทุกครั้ง · รถดับเอง = Pi ดับ งานเบื้องหลังหยุดด้วย
 
 ## งานพัฒนา
 

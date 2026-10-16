@@ -33,6 +33,9 @@ usage() {
   stop             หยุดงานเบื้องหลัง (obd rec / obd bg)
   bg <คำสั่ง>       สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น obd bg scan 7A4,742 0100-EFFF
   log              ดูความคืบหน้าของงานเบื้องหลังล่าสุด
+  wifi             ดู WiFi ที่จำไว้และที่ต่ออยู่
+  wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (Hotspot ยังมาก่อนเสมอ)
+  wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
   pair             จับคู่กล่อง OBD ใหม่
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
@@ -128,6 +131,36 @@ do_command() {
             echo $$ > "$DATA/.bg.pid"
             do_command "$@"
             echo "== เสร็จแล้ว ==" ;;
+        wifi)
+            local action=${1:-list}
+            case "$action" in
+                add)
+                    if [ $# -lt 3 ]; then
+                        echo 'ใช้แบบนี้: obd wifi add "ชื่อWiFi" "รหัส"'
+                        return 1
+                    fi
+                    # Hotspot first (10), home/extra networks after (5):
+                    # with two known networks in range NetworkManager keeps
+                    # whichever it joined, so the phone could lose the Pi
+                    as_root nmcli connection add type wifi ifname wlan0 \
+                        con-name "$2" ssid "$2" wifi-sec.key-mgmt wpa-psk \
+                        wifi-sec.psk "$3" connection.autoconnect-priority 5 &&
+                    as_root nmcli connection modify hotspot \
+                        connection.autoconnect-priority 10 2>/dev/null
+                    echo "เพิ่ม $2 แล้ว (Hotspot ยังมาก่อนเสมอถ้าเปิดอยู่)"
+                    echo "ระวัง: WiFi ที่ทำงาน/ร้านค้ามักกันไม่ให้มือถือมองเห็น Pi"
+                    echo "ถ้าเข้าไม่ได้ ให้ปิด WiFi ตัวนั้นชั่วคราว Pi จะกลับมาที่ Hotspot" ;;
+                remove|delete)
+                    as_root nmcli connection delete "${2:-}" ;;
+                *)
+                    echo "== WiFi ที่จำไว้ (ตัวเลขมาก = เลือกก่อน) =="
+                    nmcli -f NAME,TYPE,AUTOCONNECT-PRIORITY connection show |
+                        grep -E "wifi|NAME"
+                    echo "== ตอนนี้ต่ออยู่ =="
+                    nmcli -t -f NAME,DEVICE connection show --active |
+                        grep wlan0 || echo "(ไม่ได้ต่อ)"
+                    web ;;
+            esac ;;
         log)
             local last
             last=$(ls -t "$DATA"/bg_*.log "$DATA"/rec_*.log 2>/dev/null | head -1)
@@ -183,6 +216,7 @@ menu() {
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
+                 "wifi  ดู WiFi ที่จำไว้"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
                  "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"
