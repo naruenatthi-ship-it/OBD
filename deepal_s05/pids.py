@@ -149,10 +149,11 @@ MOTOR_SIGNALS = [
 # radars 753/754 F1F5 = 06 88 8E (big endian), both 42,817.4 km, between
 # the dashboard reading that morning (42,769) and later in the day; the
 # telematics box keeps the same unit in its snapshots (706 F308/F309).
+# Confirmed: the dashboard showed 42,817 km while this read 42,817.4.
 ODOMETER_SIGNALS = [
-    Signal("odometer_km", "เลขไมล์", 0xF1AE, "km", 4, CANDIDATE,
+    Signal("odometer_km", "เลขไมล์", 0xF1AE, "km", 4, VALIDATED,
            lambda d, c: int.from_bytes(d[:4], "little") / 10,
-           "700 F1AE (ตรงกับ 753/754 F1F5) รอเทียบกับหน้าปัด", header="700"),
+           "ยืนยันกับหน้าปัด 42,817 km (2026-10-16)", header="700"),
 ]
 
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
