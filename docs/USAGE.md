@@ -58,6 +58,9 @@ pip install -r requirements.txt
      (IP/port ดูได้จากคู่มือกล่อง)
    - **USB:** `COM3` หรือ `/dev/ttyUSB0`
    - **บลูทูธต่อตรง (Linux/Raspberry Pi):** จับคู่แล้วใช้ `rfcomm://AA:BB:CC:DD:EE:FF`
+   - **กล่อง Bluetooth LE** (ชื่อมีคำว่า IOS เช่น vLinker MC-IOS ไม่มีบลูทูธแบบ classic):
+     ใช้ `ble://AA:BB:CC:DD:EE:FF` ไม่ต้องจับคู่ ต้องติดตั้ง `bleak` ก่อน
+     (`sudo apt-get install python3-bleak` หรือ `pip install bleak`) บน Pi ใช้ `bash pi/pair.sh` จะตั้งให้เอง
      ไม่ต้องตั้ง `/dev/rfcomm0`
 3. ตรวจว่ารถตอบไหม:
 

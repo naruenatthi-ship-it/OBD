@@ -79,7 +79,7 @@ python -m deepal_s05 --port COM5 dashboard
 python -m deepal_s05 --port COM5 checkup
 ```
 
-`--port` คือพอร์ตของกล่อง: `COM5` (บลูทูธ/USB บน Windows), `/dev/rfcomm0`, `rfcomm://AA:BB:CC:DD:EE:FF`
+`--port` คือพอร์ตของกล่อง: `COM5` (บลูทูธ/USB บน Windows), `/dev/rfcomm0`, `rfcomm://AA:BB:CC:DD:EE:FF`, `ble://AA:BB:CC:DD:EE:FF` (กล่อง Bluetooth LE เช่น vLinker MC+ รุ่น MC-IOS ต้องมี bleak)
 (บลูทูธบน Linux/Pi) หรือ `socket://192.168.0.10:35000` (กล่อง WiFi)
 
 **ยังไม่มีรถหรือกล่อง?** ลองกับตัวจำลองได้:

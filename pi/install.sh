@@ -12,6 +12,11 @@ USER_NAME="${SUDO_USER:-$USER}"
 echo "==> ติดตั้งแพ็กเกจที่ต้องใช้"
 sudo apt-get update
 sudo apt-get install -y python3-serial bluez
+# Bluetooth LE adapters (vLinker MC+ "MC-IOS") need bleak
+sudo apt-get install -y python3-bleak || \
+    { sudo apt-get install -y python3-pip &&
+      sudo pip3 install --break-system-packages bleak; } || \
+    echo "!! ติดตั้ง bleak ไม่ได้ ถ้าใช้กล่อง Bluetooth LE ให้รัน pi/pair.sh ตอนต่อเน็ตอีกครั้ง"
 
 echo "==> คัดลอกโปรแกรมไปที่ $APP"
 sudo rm -rf "$APP"

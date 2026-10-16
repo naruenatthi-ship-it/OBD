@@ -1,6 +1,8 @@
 #!/bin/bash
 # จับคู่บลูทูธกับกล่อง OBD (vLinker หรือ ELM327 อื่น) แล้วบันทึกที่อยู่ลงไฟล์ตั้งค่า
 # วิธีใช้: เสียบกล่องที่รถ เปิดรถ แล้วรัน  bash pi/pair.sh
+#   กล่องที่มีแค่ Bluetooth LE (ชื่อมีคำว่า IOS เช่น vLinker MC-IOS) จะใช้ ble:// ให้เอง
+#   บังคับใช้ BLE:  bash pi/pair.sh ble
 set -uo pipefail
 CONF=/etc/default/deepal-obd
 
@@ -33,7 +35,32 @@ if [ ${#DEVS[@]} -gt 1 ]; then
     read -rp "เลือกหมายเลขกล่อง OBD: " CHOICE
 fi
 MAC=$(echo "${DEVS[$((CHOICE-1))]}" | awk '{print $2}')
-echo "เลือก $MAC"
+NAME=$(echo "${DEVS[$((CHOICE-1))]}" | cut -d' ' -f3-)
+echo "เลือก $MAC $NAME"
+
+test_port() {
+    sudo sed -i "s|^OBD_PORT=.*|OBD_PORT=$1|" "$CONF"
+    echo "บันทึก OBD_PORT=$1 ลง $CONF แล้ว"
+    echo
+    echo "ทดสอบอ่านค่าจากรถ..."
+    sudo systemctl stop deepal-obd 2>/dev/null
+    cd /opt/deepal-obd && python3 -m deepal_s05 --port "$1" check
+    echo
+    echo "ถ้าค่าขึ้นถูกต้อง เริ่มบริการ: sudo systemctl restart deepal-obd"
+}
+
+if [ "${1:-}" = "ble" ] || echo "$NAME" | grep -qiE "ios|ble"; then
+    echo "กล่องนี้ใช้ Bluetooth LE ไม่ต้องจับคู่"
+    if ! python3 -c "import bleak" 2>/dev/null; then
+        echo "ติดตั้งตัวช่วยสำหรับ Bluetooth LE (bleak)..."
+        sudo apt-get install -y python3-bleak || \
+            { sudo apt-get install -y python3-pip &&
+              sudo pip3 install --break-system-packages bleak; } || {
+            echo "ติดตั้ง bleak ไม่ได้ ต่อเน็ตแล้วลองใหม่"; exit 1; }
+    fi
+    test_port "ble://$MAC"
+    exit 0
+fi
 
 bluetoothctl --agent NoInputNoOutput pair "$MAC" >/dev/null 2>&1
 bluetoothctl trust "$MAC" >/dev/null 2>&1
@@ -50,12 +77,4 @@ if ! bluetoothctl info "$MAC" | grep -q "Paired: yes"; then
     exit 1
 fi
 
-sudo sed -i "s|^OBD_PORT=.*|OBD_PORT=rfcomm://$MAC|" "$CONF"
-echo "บันทึก OBD_PORT=rfcomm://$MAC ลง $CONF แล้ว"
-
-echo
-echo "ทดสอบอ่านค่าจากรถ..."
-sudo systemctl stop deepal-obd 2>/dev/null
-cd /opt/deepal-obd && python3 -m deepal_s05 --port "rfcomm://$MAC" check
-echo
-echo "ถ้าค่าขึ้นถูกต้อง เริ่มบริการ: sudo systemctl restart deepal-obd"
+test_port "rfcomm://$MAC"

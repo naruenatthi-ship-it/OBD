@@ -106,9 +106,13 @@ def open_rfcomm(url, timeout=0.2):
 def open_port(port, baudrate=38400, timeout=1.0):
     """`port` is a serial device (/dev/rfcomm0, /dev/ttyUSB0, COM5), a
     pyserial URL such as socket://192.168.0.10:35000 for WiFi adapters, or
-    rfcomm://<MAC> for a paired Bluetooth adapter."""
+    rfcomm://<MAC> for a paired Bluetooth adapter, or ble://<MAC> for a
+    Bluetooth LE adapter."""
     if port.startswith("rfcomm://"):
         return open_rfcomm(port, timeout)
+    if port.startswith("ble://"):
+        from .ble import open_ble
+        return open_ble(port, timeout)
     if "://" in port:
         return serial.serial_for_url(port, timeout=timeout)
     return serial.Serial(port, baudrate=baudrate, timeout=timeout)
