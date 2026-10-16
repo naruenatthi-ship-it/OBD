@@ -149,3 +149,18 @@ def test_page_shows_survey_progress_while_it_waits(tmp_path, monkeypatch):
     elm.volts = [12.4]
     pilot.step()                           # asleep
     assert "สำรวจ" in pilot.state.data["status"]
+
+
+def test_survey_shortens_the_adapter_timer_and_restores_it(tmp_path):
+    s = survey.Survey(str(tmp_path), clock=Tick())
+    s.start(["7A1"], [(0, 0xFF)])
+    elm = Elm({})
+    sent = []
+    elm._ok = sent.append
+    s.run(elm, 0.5)
+    assert sent == [survey.QUICK_ST, survey.NORMAL_ST]
+    broken = Elm({}, timeout_from=0)
+    broken._ok = sent.append
+    with pytest.raises(ElmError):
+        s.run(broken, 100)
+    assert sent[-1] == survey.NORMAL_ST       # restored even on errors

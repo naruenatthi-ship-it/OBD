@@ -26,6 +26,11 @@ SAVE_EVERY_S = 60.0
 # this many timeouts in a row means the adapter, not the DID: stop and
 # read them again later
 MAX_TIMEOUTS = 5
+# Most DIDs get no answer at all, and the adapter waits its full answer
+# timer for each (ATST32 = 200 ms): about 250 DIDs a minute on silent ECUs
+# against 500 on ECUs that refuse quickly. ECUs answer within 50 ms
+# (ISO 14229 P2), so the survey asks the adapter to wait 100 ms.
+QUICK_ST, NORMAL_ST = "ATST19", "ATST32"
 
 
 def plan(headers, ranges=DEFAULT_RANGES):
@@ -129,6 +134,7 @@ class Survey:
             return 0
         t0 = self.clock()
         n = timeouts = 0
+        self._timer(elm, QUICK_ST)
         try:
             while self.clock() - t0 < budget_s:
                 task = self.current()
@@ -154,12 +160,25 @@ class Survey:
                     self.state["found"] += 1
                     self._write(task["header"], did, raw)
         finally:
+            self._timer(elm, NORMAL_ST)
             self.state["checked"] += max(n, 0)
             self.state["busy_s"] += self.clock() - t0
             if self.clock() - self.last_save >= SAVE_EVERY_S or \
                     self.current() is None:
                 self.save()
         return n
+
+    @staticmethod
+    def _timer(elm, cmd):
+        """Set the adapter's answer timer; not every adapter (or test
+        stand-in) takes it, and the survey works either way."""
+        setter = getattr(elm, "_ok", None)
+        if setter is None:
+            return
+        try:
+            setter(cmd)
+        except ElmError:
+            pass
 
     def flush(self):
         if self.state is not None:
