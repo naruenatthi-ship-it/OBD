@@ -73,3 +73,12 @@ def test_moving_bytes_and_read_record(tmp_path):
     assert rows[0]["soc"] == 50 and rows[2]["did_7A1_F2C0"] is None
     assert reverse.moving_bytes(rows, keys) == [
         ("did_7A1_F2C0", 0, 0x45, 0x46, 2)]
+
+
+def test_watch_list_ships_with_the_program():
+    import os
+    from deepal_s05 import reverse
+    path = os.path.join(os.path.dirname(__file__), "..", "examples",
+                        "watch_live.csv")
+    keys = reverse.read_scan(path)
+    assert ("700", "F2F0") in keys and ("780", "FD0C") in keys

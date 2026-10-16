@@ -38,7 +38,8 @@ usage() {
   predict          เตือนล่วงหน้า: ชิ้นไหนเริ่มผิดปกติ/จะถึงเกณฑ์เมื่อไร (/health)
   scan HEADER [ช่วง]  สแกน DID เช่น obd scan 7A7 0100-01FF (ค่าเริ่มต้น F100-F3FF)
   live             ดูค่าสดในหน้าจอ (Ctrl+C เพื่อหยุด)
-  rec [ชื่อ] [นาที]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
+  rec [ชื่อ] [นาที] [watch]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
+                   ใส่ watch = ค่าที่น่าจับตาจากการสำรวจ (700, ความเร็วล้อ 780)
                    เช่น obd rec drive 20 (ปิด Termius/ล็อกจอขับได้เลย)
   stop             หยุดงานเบื้องหลัง (obd rec / obd bg)
   bg <คำสั่ง>       สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น obd bg scan 7A4,742 0100-EFFF
@@ -289,7 +290,11 @@ do_command() {
         trip)    cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 trip "$@" ;;
         rec)
             local name=${1:-drive} minutes=${2:-20} scan
-            scan=$(ls -t "$DATA"/scan_*.csv 2>/dev/null | head -1)
+            case "${3:-}" in
+                watch) scan="$APP/examples/watch_live.csv" ;;
+                "")    scan=$(ls -t "$DATA"/scan_*.csv 2>/dev/null | head -1) ;;
+                *)     scan=$3 ;;
+            esac
             if [ -z "$scan" ]; then
                 echo "ยังไม่มีไฟล์ scan ให้ใช้ สแกนก่อน เช่น obd scan 7A7 F400-FFFF"
                 return 1

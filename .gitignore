@@ -4,6 +4,7 @@ __pycache__/
 *.csv
 *.json
 !examples/*.json
+!examples/*.csv
 *.log
 *.log.*
 !tests/fixtures/**/*.json
