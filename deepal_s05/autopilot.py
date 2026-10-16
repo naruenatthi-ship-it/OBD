@@ -14,7 +14,7 @@ import threading
 import time
 import traceback
 
-from . import alerts, dashboard, identity, pids, snapshot
+from . import alerts, dashboard, identity, pids, snapshot, survey
 from .elm327 import ElmError
 
 
@@ -43,6 +43,15 @@ class State:
             return json.dumps(self.data, ensure_ascii=False)
 
 
+def boot_time():
+    """When the Pi started (seconds since the epoch), 0 if unknown."""
+    try:
+        with open("/proc/uptime") as f:
+            return time.time() - float(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+
+
 def last_checkup_time(path):
     """Time of the newest row in checkup_history.csv, or None."""
     try:
@@ -65,7 +74,7 @@ class Autopilot:
                  asleep_poll=60.0, rest_log_every=300.0, retry=30.0,
                  checkup_days=7.0, run_checkup=None, shutdown_below=None,
                  shutdown_after=600.0, shutdown=None, clock=time.time,
-                 info=None, vehicle=None, baselines=None):
+                 info=None, vehicle=None, baselines=None, private=()):
         self.open_elm = open_elm
         self.signals, self.arrays = signals, arrays
         self.data_dir = data_dir
@@ -93,6 +102,7 @@ class Autopilot:
         self.drive_log = None
         self.drive_log_day = None
         os.makedirs(data_dir, exist_ok=True)
+        self.survey = survey.Survey(data_dir, private, clock)
 
     # -- helpers ---------------------------------------------------------
     def path(self, name):
@@ -159,6 +169,12 @@ class Autopilot:
         self.low_since = None
         if self.awake_since is None:
             self.awake_since = now
+            # `obd stop` paused the survey until the car is started again;
+            # a Pi that lost power with the car has rebooted since then
+            paused = self.survey.load() and \
+                self.survey.state["pause_until_wake"]
+            if paused and boot_time() > paused:
+                self.survey.set(pause_until_wake=False)
         try:
             snap = snapshot.take(self.elm, self.signals, self.arrays,
                                  self.capacity, slow=self.slow)
@@ -203,6 +219,20 @@ class Autopilot:
                 self.baselines = alerts.load_baselines(
                     self.path("checkup_history.csv"))
             return 1.0
+        # the DID survey uses the time between rounds, standing still only
+        still = abs(values.get("motor_rpm") or 0) < 50 and \
+            (values.get("speed_kmh") or 0) < 1
+        if still and self.survey.active():
+            try:
+                self.survey.run(self.elm, self.interval - 1)
+            except (ElmError, OSError) as e:  # the adapter, not one DID
+                self.survey.flush()
+                self.disconnect()
+                self.state.update(status="สำรวจ DID สะดุด (%s)" % e)
+                return self.retry
+            self.state.update(status="รถตื่น กำลังบันทึก · " +
+                              self.survey.status())
+            return 0.5
         return self.interval
 
     def run_predict(self):
@@ -222,7 +252,11 @@ class Autopilot:
         if self.awake_since is not None:
             self.awake_since = None
             self.close_drive_log()
+            self.survey.flush()
             self.run_predict()
+        # the car slept: a survey paused by `obd stop` goes on next start
+        if self.survey.load() and self.survey.state["pause_until_wake"]:
+            self.survey.set(pause_until_wake=False)
         if self.last_rest_log is None or \
                 now - self.last_rest_log >= self.rest_log_every:
             month = datetime.datetime.fromtimestamp(now).strftime("%Y%m")

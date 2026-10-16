@@ -1155,7 +1155,8 @@ def cmd_autopilot(args):
         run_checkup=run_checkup, shutdown_below=args.shutdown_below,
         shutdown=shutdown, vehicle=args.vehicle, baselines=args.baselines,
         info=identity.pack_info(args.vehicle, args.capacity,
-                                abnormal_mv=args.abnormal_mv))
+                                abnormal_mv=args.abnormal_mv),
+        private=PRIVATE_DIDS)
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
                                    data_dir, car_name=args.vehicle.name,
                                    car_key=args.car)
@@ -1628,6 +1629,37 @@ def cmd_canfind(args):
                                             value))
     print("\nเจอหลายที่ได้ ตัวจริงจะเพิ่มตามระยะทางเมื่อขับ: ขับสักนิดแล้ว canscan"
           " ใหม่ แล้วดูว่าค่าไหนขยับตาม")
+    return 0
+
+
+def cmd_survey(args):
+    from . import survey, visual
+    s = survey.Survey(args.dir, PRIVATE_DIDS)
+    if args.action == "start":
+        if args.headers:
+            headers = [h.strip().upper() for h in args.headers.split(",")]
+        else:
+            path = visual.latest(args.dir, "ecus_*.csv")
+            if not path:
+                print("ยังไม่รู้ว่ามีกล่องอะไรบ้าง: ใส่ --headers หรือรัน obd ecus ก่อน")
+                return 1
+            headers = [r["header"] for r in visual.read_csv(path)]
+        ranges = parse_ranges(args.ranges) if args.ranges else \
+            survey.DEFAULT_RANGES
+        if s.load() and s.current() is not None and not args.force:
+            print("มีการสำรวจค้างอยู่ (%s) ใส่ --force ถ้าจะเริ่มใหม่" % s.status())
+            return 1
+        s.start(headers, ranges)
+        print("เริ่มสำรวจ %d กล่อง (%s) รวม %d DID" % (
+            len(headers), ",".join(headers), s.total()))
+        print("ทำเองทุกครั้งที่รถเปิดและจอดนิ่ง (รวมตอนชาร์จ) ต่อจากที่ค้างไว้เสมอ")
+    elif args.action == "pause":
+        s.set(paused=True)
+    elif args.action == "resume":
+        s.set(paused=False, pause_until_wake=False)
+    elif args.action == "until-wake":
+        s.set(pause_until_wake=time.time())
+    print(s.status())
     return 0
 
 
@@ -2193,6 +2225,17 @@ def build_parser():
     cf.add_argument("--tolerance", type=float, default=50)
     cf.set_defaults(func=cmd_canfind)
 
+    su = sub.add_parser("survey",
+                        help="สำรวจ DID ทุกกล่องแบบค่อยเป็นค่อยไป ทำต่อเองทุกครั้งที่รถเปิด")
+    su.add_argument("action", nargs="?", default="status",
+                    choices=["status", "start", "pause", "resume",
+                             "until-wake"])
+    su.add_argument("--dir", default=".")
+    su.add_argument("--headers", help="กล่องที่จะสำรวจ (ค่าเริ่มต้น: จากไฟล์ ecus_ ล่าสุด)")
+    su.add_argument("--ranges", help="ช่วง DID (ค่าเริ่มต้น F000-FFFF,D000-EFFF,0000-CFFF)")
+    su.add_argument("--force", action="store_true")
+    su.set_defaults(func=cmd_survey)
+
     so = sub.add_parser("soh", help="วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)")
     so.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
     so.set_defaults(func=cmd_soh)
@@ -2237,7 +2280,8 @@ def main(argv=None):
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
                cmd_visual, cmd_predict, cmd_clean, cmd_soh,
-               cmd_cancompare, cmd_cost, cmd_serve, cmd_canfind)
+               cmd_cancompare, cmd_cost, cmd_serve, cmd_canfind,
+               cmd_survey)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

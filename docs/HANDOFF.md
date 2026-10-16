@@ -38,6 +38,10 @@
   `obd vps setup ผู้ใช้@VPS` → rsync ทุก 15 นาที (deepal-vps-sync.timer) + `serve` บน VPS (basic auth, crontab @reboot)
   · VPS ของเจ้าของใช้เป็นบอท download/upload อยู่แล้ว ต้องเช็ก python3/rsync/พอร์ต 8080 ว่าว่าง
   · predict อ่านไฟล์ขับ 90 วันล่าสุด เก็บเซลล์ทุก 10 แถว (~80 MB ต่อข้อมูล 1 เดือน ขับวันละชั่วโมง)
+- `obd survey` (`deepal_s05/survey.py`): autopilot ใช้เวลาว่างระหว่างรอบ (จอดนิ่งเท่านั้น rpm < 50) ถาม DID ต่อจาก
+  `survey.json` ผลลง `survey_results.csv` · timeout 5 ครั้งติด = กล่อง OBD หลุด (คืน DID แล้วต่อใหม่) · `obd stop` ตั้ง
+  `pause_until_wake` = เวลา → ปลดเมื่อเห็นรถหลับ หรือ Pi บูตหลังเวลานั้น · ยังไม่ได้ลองกับรถ
+  · ทั้งหมด 18 กล่อง × 65,536 = 1.18 ล้าน DID ที่ ~300/นาที ≈ 65 ชม.ที่รถเปิดจอด (ชาร์จค้างคืนช่วยมาก)
 - `obd telegram TOKEN` / `obd telegram`: บันทึก `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` ลง
   `/etc/default/deepal-obd` (chmod 640) หาเลขแชตจาก getUpdates ส่งข้อความทดสอบ แล้ว restart บริการ
   · ยังไม่เคยลองกับบอทจริง (ในเทสต์ใช้ API ปลอม) · ต้อง `obd update` ก่อน

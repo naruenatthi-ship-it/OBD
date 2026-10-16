@@ -50,6 +50,9 @@ usage() {
   wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
   vps setup ผู้ใช้@เครื่อง [พอร์ตเว็บ]  ตั้งให้ส่งข้อมูลขึ้น VPS ทุก 15 นาที ดูรถจากที่ไหนก็ได้
   vps sync / vps   ส่งข้อมูลขึ้น VPS เดี๋ยวนี้ / ดูสถานะ
+  survey           สถานะการสำรวจ DID ต่อเนื่อง (% ที่เสร็จ, เจอกี่ค่า)
+  survey start     เริ่มสำรวจทุกกล่อง ทุก DID 0000-FFFF ทำต่อเองทุกครั้งที่รถเปิดและจอดนิ่ง
+  survey pause / survey resume   หยุด / ทำต่อ (obd stop = หยุดจนสตาร์ทรถรอบหน้า)
   soh              วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)
   cost             ค่าไฟการชาร์จรายเดือน
   canscan [ชื่อ]    ดักฟัง CAN ที่รถกระจายเอง (ฟังอย่างเดียว ~3 นาที) เช่น obd canscan charging
@@ -386,6 +389,11 @@ do_command() {
                 echo "หยุดงานเบื้องหลังแล้ว (โหมดอัตโนมัติจะเปิดคืนเอง)"
             else
                 echo "ไม่มีงานเบื้องหลังที่กำลังทำงานอยู่"
+            fi
+            # the survey waits for the next start of the car
+            if [ -f "$DATA/survey.json" ]; then
+                (cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 survey \
+                    until-wake --dir "$DATA")
             fi ;;
         pair)    bash "$APP/pi/pair.sh" "$@" ;;
         status)
@@ -396,6 +404,9 @@ do_command() {
         web)     web ;;
         telegram) telegram "$@" ;;
         vps)     vps "$@" ;;
+        survey)
+            cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 survey \
+                "${1:-status}" --dir "$DATA" "${@:2}" ;;
         soh|cost)
             cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 "$cmd" \
                 --dir "$DATA" "$@" ;;
@@ -449,7 +460,7 @@ menu() {
                  "topo  แผนผัง ECU ทั้งคัน" "freeze  ภาพนิ่งตอนเกิดโค้ด"
                  "dyno  ไดโน + แผนที่ประสิทธิภาพ" "chargecurve  กราฟการชาร์จ"
                  "predict  เตือนล่วงหน้า" "soh  วัดความจุแบตจริง"
-                 "cost  ค่าไฟการชาร์จ" "vps  สถานะ VPS" "clean  ลบไฟล์ที่ไม่จำเป็น"
+                 "survey  สถานะการสำรวจ DID" "cost  ค่าไฟการชาร์จ" "vps  สถานะ VPS" "clean  ลบไฟล์ที่ไม่จำเป็น"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
                  "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"
