@@ -51,6 +51,7 @@ echo "$USER_NAME ALL=(root) NOPASSWD: /sbin/shutdown" | \
     sudo tee /etc/sudoers.d/deepal-obd >/dev/null
 sudo chmod 440 /etc/sudoers.d/deepal-obd
 sudo usermod -aG bluetooth "$USER_NAME"
+sudo rfkill unblock bluetooth || true  # some images ship it blocked
 
 echo "==> ติดตั้งบริการให้เริ่มเองทุกครั้งที่เปิดเครื่อง"
 sed "s/@USER@/$USER_NAME/" "$APP/pi/deepal-obd.service" | \

@@ -5,7 +5,14 @@ set -uo pipefail
 CONF=/etc/default/deepal-obd
 
 sudo systemctl start bluetooth
-bluetoothctl power on >/dev/null
+# some Raspberry Pi OS images ship with Bluetooth soft-blocked
+sudo rfkill unblock bluetooth
+if ! sudo bluetoothctl power on >/dev/null 2>&1; then
+    echo "เปิดบลูทูธของ Pi ไม่ได้:"
+    sudo bluetoothctl power on
+    rfkill list bluetooth
+    exit 1
+fi
 
 echo "กำลังค้นหาอุปกรณ์บลูทูธ 20 วินาที (เปิดรถไว้ และอยู่ใกล้กล่อง)..."
 bluetoothctl --timeout 20 scan on >/dev/null 2>&1
