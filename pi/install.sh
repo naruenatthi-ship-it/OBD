@@ -23,6 +23,10 @@ sudo rm -rf "$APP"
 sudo mkdir -p "$APP"
 sudo cp -r "$SRC/deepal_s05" "$SRC/pi" "$SRC/examples" "$SRC/README.md" "$APP/"
 
+echo "==> ติดตั้งคำสั่งลัด obd"
+sudo install -m 755 "$SRC/pi/obd" /usr/local/bin/obd
+echo "$SRC" | sudo tee "$APP/.source" >/dev/null
+
 echo "==> สร้างโฟลเดอร์เก็บข้อมูล $DATA"
 sudo install -d -o "$USER_NAME" -g "$USER_NAME" "$DATA"
 
@@ -51,9 +55,13 @@ sudo mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nStorage=volatile\nRuntimeMaxUse=20M\n' | \
     sudo tee /etc/systemd/journald.conf.d/deepal-obd.conf >/dev/null
 
-echo "==> อนุญาตให้โปรแกรมสั่งปิดเครื่องเมื่อแบต 12V ต่ำ"
-echo "$USER_NAME ALL=(root) NOPASSWD: /sbin/shutdown" | \
-    sudo tee /etc/sudoers.d/deepal-obd >/dev/null
+echo "==> อนุญาตให้โปรแกรมสั่งปิดเครื่องเมื่อแบต 12V ต่ำ และหยุด/เปิดบริการโดยไม่ถามรหัส"
+{
+    echo "$USER_NAME ALL=(root) NOPASSWD: /sbin/shutdown"
+    for action in start stop restart; do
+        echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl $action deepal-obd"
+    done
+} | sudo tee /etc/sudoers.d/deepal-obd >/dev/null
 sudo chmod 440 /etc/sudoers.d/deepal-obd
 sudo usermod -aG bluetooth "$USER_NAME"
 sudo rfkill unblock bluetooth || true  # some images ship it blocked
@@ -66,7 +74,9 @@ sudo systemctl enable deepal-obd
 
 echo
 echo "ติดตั้งเสร็จแล้ว ขั้นต่อไป:"
-echo "  1. เสียบกล่อง OBD ที่รถ เปิดรถให้ READY แล้วรัน: bash pi/pair.sh"
+echo "  1. เสียบกล่อง OBD ที่รถ เปิดรถให้ READY แล้วรัน: obd pair"
 echo "  2. (ไม่บังคับ) แก้ตั้งค่า: sudo nano $CONF"
 echo "  3. เริ่มบริการ: sudo systemctl restart deepal-obd"
-echo "  4. ดูการทำงาน: journalctl -u deepal-obd -f"
+echo "  4. ดูการทำงาน: obd status"
+echo
+echo "ต่อไปพิมพ์ obd เพื่อเปิดเมนูคำสั่งทั้งหมด"

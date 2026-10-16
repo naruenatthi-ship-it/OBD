@@ -11,12 +11,7 @@
 - ถ้าใช้ Raspberry Pi: ssh เข้า Pi (จากคอม หรือจาก iPhone ด้วยแอป **Termius** ผ่าน Hotspot)
   แล้วหยุดโหมดอัตโนมัติก่อน เพราะกล่องรับได้ทีละโปรแกรม
 
-  ```bash
-  sudo systemctl stop deepal-obd
-  cd /var/lib/deepal-obd
-  alias obd='python3 -m deepal_s05 --port rfcomm://MAC_ของกล่อง'   # เปลี่ยน MAC
-  export PYTHONPATH=/opt/deepal-obd
-  ```
+  แล้วใช้คำสั่งลัด `obd` ได้เลย (หยุดและเปิดโหมดอัตโนมัติให้เอง เก็บไฟล์ใน `/var/lib/deepal-obd`)
 
   (ถ้าใช้คอม ให้แทน `obd` ด้วย `python -m deepal_s05 --port COM5`)
 - จดเวลาที่เริ่มแต่ละขั้น และ**ถ่ายรูปหน้าจอรถ**ตอนเริ่มและจบแต่ละขั้น

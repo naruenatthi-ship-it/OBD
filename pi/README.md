@@ -117,6 +117,28 @@ sudo nano /etc/default/deepal-obd
 - ติดใน **Honda CR-V e:HEV**: ดูขั้นตอนใน [docs/CRV.md](../docs/CRV.md#ใช้กับ-raspberry-pi)
 - เสร็จแล้วกด Ctrl+O, Enter, Ctrl+X แล้ว `sudo systemctl restart deepal-obd`
 
+## คำสั่งลัด `obd` (ใช้แทนการพิมพ์คำสั่งยาวๆ)
+
+ssh เข้า Pi แล้วพิมพ์ **`obd`** จะขึ้นเมนูตัวเลขให้เลือก หรือพิมพ์ตรงๆ เช่น `obd check`, `obd health`
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `obd check` | อ่านค่าทั้งหมด + รหัส BMS บันทึก `check_วันเวลา.json` |
+| `obd health` | ตรวจสุขภาพแบต เก็บประวัติไว้เทียบ |
+| `obd ir` | วัด IR แพ็กและรายเซลล์ 60 วินาที (ให้คนอื่นขับ) |
+| `obd checkup` | ตรวจรถรายสัปดาห์ |
+| `obd dtc` / `obd ecus` | อ่านโค้ดปัญหา / หากล่อง ECU |
+| `obd scan 7A7 0100-01FF` | สแกน DID ของกล่องที่ต้องการ |
+| `obd live` | ดูค่าสดในหน้าจอ |
+| `obd status` / `obd web` | สถานะโหมดอัตโนมัติ / ที่อยู่หน้า dashboard |
+| `obd update` | อัปเดตโปรแกรมจาก GitHub |
+| `obd pair` | จับคู่กล่องใหม่ |
+
+`obd` หยุดโหมดอัตโนมัติให้ก่อนรัน และเปิดคืนเองเมื่อเสร็จ (แม้กด Ctrl+C) ไฟล์ผลลัพธ์อยู่ใน
+`/var/lib/deepal-obd` ดาวน์โหลดได้จากหน้า `/files` คำสั่งอื่นที่ไม่อยู่ในรายการก็ใช้ได้ เช่น `obd balance`
+
+💡 ใน Termius บันทึกคำสั่งที่ใช้บ่อยเป็น **Snippets** ได้ แตะครั้งเดียวก็รัน
+
 ## การใช้งานประจำวัน
 
 | ทำอะไร | วิธี |
@@ -124,7 +146,7 @@ sudo nano /etc/default/deepal-obd
 | ดูค่าสดในรถ | เปิด Hotspot ของ iPhone แล้วเข้า `http://deepal-pi.local:8000` (ถ้าไม่ขึ้น ใช้ IP ของ Pi แทน) |
 | ดาวน์โหลดประวัติ | อยู่วง WiFi เดียวกับ Pi แล้วเข้า `http://deepal-pi.local:8000/files` |
 | ดูกราฟแนวโน้ม | `http://deepal-pi.local:8000/trends` |
-| สั่งคำสั่งอื่นเอง (เช่น `ecus`, `discover`) | ssh เข้า Pi แล้ว `sudo systemctl stop deepal-obd` ก่อน (กล่องรับได้ทีละโปรแกรม) จากนั้น `cd /opt/deepal-obd && python3 -m deepal_s05 --port rfcomm://MAC ecus` เสร็จแล้ว `sudo systemctl start deepal-obd` |
+| สั่งคำสั่งอื่นเอง (เช่น `ecus`, `discover`) | ssh เข้า Pi แล้วใช้ `obd` (ดูหัวข้อคำสั่งลัดด้านบน) |
 
 ## ติดตั้งในรถ
 
@@ -140,7 +162,9 @@ sudo nano /etc/default/deepal-obd
 ## อัปเดตโปรแกรม
 
 ```bash
-cd ~/OBD && git pull && bash pi/install.sh && sudo systemctl restart deepal-obd
+obd update
 ```
+
+(ครั้งแรกที่ยังไม่มีคำสั่ง `obd`: `cd ~/OBD && git pull && bash pi/install.sh && sudo systemctl restart deepal-obd`)
 
 (install.sh ไม่ทับไฟล์ตั้งค่าและข้อมูลที่เก็บไว้)

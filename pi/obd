@@ -1,0 +1,135 @@
+#!/bin/bash
+# คำสั่งลัดบน Raspberry Pi: พิมพ์ obd เฉยๆ เพื่อเปิดเมนู หรือ obd <คำสั่ง>
+# หยุดโหมดอัตโนมัติให้ก่อน แล้วเปิดคืนเองเมื่อเสร็จ (แม้กด Ctrl+C)
+# ไฟล์ผลลัพธ์อยู่ใน /var/lib/deepal-obd (ดาวน์โหลดได้จากหน้า /files)
+set -uo pipefail
+
+APP=${OBD_APP:-/opt/deepal-obd}
+DATA=${OBD_DATA:-/var/lib/deepal-obd}
+CONF=${OBD_CONF:-/etc/default/deepal-obd}
+SYSTEMCTL=${OBD_SYSTEMCTL:-/usr/bin/systemctl}
+STAMP=$(date +%Y%m%d-%H%M)
+
+# shellcheck disable=SC1090
+source "$CONF"
+OBD_PORT=${OBD_PORT:-}
+OBD_OPTIONS=${OBD_OPTIONS:-}
+
+usage() {
+    cat <<'EOF'
+วิธีใช้: obd            เปิดเมนู
+        obd <คำสั่ง>
+
+  check            อ่านค่าทั้งหมด + รหัส BMS (บันทึก check_วันเวลา.json)
+  health           ตรวจสุขภาพแบต เก็บประวัติไว้เทียบ
+  ir               health + วัด IR แพ็กและรายเซลล์ 60 วินาที (ให้คนอื่นขับ)
+  checkup          ตรวจรถรายสัปดาห์ (ค่าแบต + โค้ดปัญหาทุกกล่อง)
+  dtc              อ่านโค้ดปัญหาทุกกล่อง (บันทึก dtc_วันเวลา.csv)
+  ecus             หากล่อง ECU ทั้งหมด (บันทึก ecus_วันเวลา.csv)
+  scan HEADER [ช่วง]  สแกน DID เช่น obd scan 7A7 0100-01FF (ค่าเริ่มต้น F100-F3FF)
+  live             ดูค่าสดในหน้าจอ (Ctrl+C เพื่อหยุด)
+  pair             จับคู่กล่อง OBD ใหม่
+  status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
+  web              บอกที่อยู่หน้า dashboard
+  update           อัปเดตโปรแกรมจาก GitHub (ต้องต่อเน็ต)
+  อื่นๆ            ส่งต่อให้โปรแกรมตรงๆ เช่น obd balance, obd record --note test
+EOF
+}
+
+as_root() {
+    if [ "$(id -u)" = 0 ]; then
+        "$@"
+    else
+        sudo -n "$@" 2>/dev/null || sudo "$@"
+    fi
+}
+
+was_active=0
+restore() {
+    if [ "$was_active" = 1 ]; then
+        as_root "$SYSTEMCTL" start deepal-obd
+        echo "(เปิดโหมดอัตโนมัติคืนแล้ว)"
+    fi
+}
+
+# run the program with the adapter to ourselves, from the data folder so
+# history files land where the dashboard and autopilot use them
+run() {
+    if [ -z "$OBD_PORT" ] || [[ "$OBD_PORT" == *00:00:00:00:00:00* ]]; then
+        echo "ยังไม่ได้จับคู่กล่อง OBD: รัน obd pair ก่อน"
+        return 1
+    fi
+    if "$SYSTEMCTL" is-active --quiet deepal-obd; then
+        was_active=1
+        trap restore EXIT
+        as_root "$SYSTEMCTL" stop deepal-obd
+    fi
+    cd "$DATA" || return 1
+    # shellcheck disable=SC2086  # OBD_OPTIONS holds several options
+    PYTHONPATH="$APP" python3 -m deepal_s05 --port "$OBD_PORT" \
+        $OBD_OPTIONS "$@"
+}
+
+web() {
+    local ip
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    echo "หน้า dashboard: http://${ip:-deepal-pi.local}:8000"
+    echo "ไฟล์ข้อมูล:     http://${ip:-deepal-pi.local}:8000/files"
+}
+
+do_command() {
+    local cmd=${1:-}
+    shift || true
+    case "$cmd" in
+        check)   run check --save "$DATA/check_$STAMP.json" "$@" ;;
+        health)  run health "$@" ;;
+        ir)      run health --ir 60 --cell-ir "$@" ;;
+        checkup) run checkup "$@" ;;
+        dtc)     run dtc --save "$DATA/dtc_$STAMP.csv" "$@" ;;
+        ecus)    run ecus --save "$DATA/ecus_$STAMP.csv" "$@" ;;
+        scan)
+            if [ $# -lt 1 ]; then
+                echo "ใส่ header ด้วย เช่น obd scan 7A7 หรือ obd scan 7A7 0100-01FF"
+                return 1
+            fi
+            local header=$1 ranges=${2:-F100-F3FF}
+            shift; [ $# -gt 0 ] && shift
+            run discover --header "$header" --ranges "$ranges" \
+                --save "$DATA/scan_${header//,/_}_$STAMP.csv" "$@" ;;
+        live)    run live "$@" ;;
+        pair)    bash "$APP/pi/pair.sh" "$@" ;;
+        status)
+            "$SYSTEMCTL" status deepal-obd --no-pager | head -5
+            echo "--- log ล่าสุด ---"
+            journalctl -u deepal-obd -n 15 --no-pager
+            web ;;
+        web)     web ;;
+        update)
+            local src
+            src=$(cat "$APP/.source" 2>/dev/null || echo "$HOME/OBD")
+            cd "$src" && git pull && bash pi/install.sh &&
+                as_root "$SYSTEMCTL" restart deepal-obd &&
+                echo "อัปเดตเสร็จแล้ว" ;;
+        help|-h|--help) usage ;;
+        "")      menu ;;
+        *)       run "$cmd" "$@" ;;
+    esac
+}
+
+menu() {
+    local items=("check  อ่านค่าทั้งหมด" "health  ตรวจสุขภาพแบต"
+                 "ir  วัด IR (ให้คนอื่นขับ)" "checkup  ตรวจรถรายสัปดาห์"
+                 "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
+                 "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
+                 "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
+    echo "เลือกหมายเลขแล้วกด Enter:"
+    PS3="หมายเลข: "
+    select item in "${items[@]}"; do
+        [ -z "${item:-}" ] && { echo "พิมพ์หมายเลข 1-${#items[@]}"; continue; }
+        [ "$item" = "ออก" ] && return 0
+        do_command "${item%% *}"
+        return $?
+    done
+}
+
+do_command "$@"
