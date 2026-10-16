@@ -12,6 +12,8 @@
   · `obd rec ชื่อ นาที watch` บันทึกค่าที่ survey เห็นว่าเปลี่ยน (`examples/watch_live.csv`: 700 + 780 FD0C–FD1E)
   · ตัวอ่าน CSV ข้ามไบต์ศูนย์ (ไฟดับกลางคัน) · survey fsync ทุกแถว
   · `7A1 F260` = 8000 คงที่ → `iso_candidate_kohm` (EXPERIMENTAL ไม่แจ้งเตือน) ค่าฉนวน HV ตัวเต็ง
+- อีก session (`3g6l2n`) ทำงานคู่ขนาน push ไป happy-hawking ด้วย: ก่อน push ให้ `git fetch` แล้ว merge ก่อนเสมอ
+  · `obd vps setup` แก้ให้ไม่ทำ cron ของบอทบน VPS หาย (`pi/vps-cron.sh` สำรอง + ไม่แตะถ้าอ่านไม่ได้) เทสต์ผ่าน 231
 - งานที่ค้างกลางทาง: ให้ `/files` เปิดได้ระหว่าง `obd bg`/`obd rec` โดยรัน `serve` (ไม่ต้องใช้กล่อง) ที่พอร์ต 8000
   แทน dashboard ชั่วคราว · ติดที่ `serve` บังคับรหัสผ่านเมื่อเปิดให้เครื่องอื่นเข้า (ตั้งใจไว้สำหรับ VPS)
   → รอเจ้าของเลือก: ตั้งรหัสผ่านหน้าเว็บบน Pi (`OBD_WEB_PASSWORD` ใน /etc/default/deepal-obd) หรือแบบอื่น
