@@ -213,3 +213,24 @@ def test_isotp_lost_frame_is_an_error():
     assert assemble_isotp([ff, cf1])[0][:6] == bytes.fromhex("59041B270589")
     with pytest.raises(ElmError):
         assemble_isotp([ff, cf2])
+
+
+def test_snapshot_waits_when_the_ecu_says_wait():
+    from deepal_s05.elm327 import Elm327
+
+    class Elm(Elm327):
+        def __init__(self):
+            self.sent, self.calls = [], 0
+
+        def _ok(self, cmd):
+            self.sent.append(cmd)
+
+        def request(self, header, payload, timeout=None):
+            self.calls += 1
+            if self.calls == 1:  # first try: only "response pending"
+                return [bytes.fromhex("7F1978")], "708 03 7F 19 78"
+            return [bytes.fromhex("5904941411080101F2290001")], ""
+    elm = Elm()
+    msg = elm.read_snapshot("700", dtc.code_bytes("B1414-11"))
+    assert msg.startswith(bytes.fromhex("5904941411"))
+    assert elm.sent == ["ATSTFF", "ATST32"]  # longer wait, then restored

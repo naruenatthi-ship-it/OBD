@@ -49,6 +49,10 @@ class NegativeResponse(ElmError):
         super().__init__("NRC 0x%02X %s" % (nrc, NRC_NAMES.get(nrc, "")))
 
 
+class ResponsePending(NoData):
+    """The ECU only said "wait" (7F xx 78) before the adapter gave up."""
+
+
 class SocketPort:
     """The part of the pyserial interface Elm327 uses, over a connected
     stream socket (Bluetooth RFCOMM)."""
@@ -339,13 +343,17 @@ class Elm327:
     def _positive(self, header, payload, timeout=None):
         sid = int(payload[:2], 16)
         messages, reply = self.request(header, payload, timeout)
+        pending = False
         for msg in messages:
             if len(msg) >= 3 and msg[0] == 0x7F and msg[1] == sid:
                 if msg[2] == 0x78:  # response pending, real answer follows
+                    pending = True
                     continue
                 raise NegativeResponse(sid, msg[2])
             if msg and msg[0] == sid + 0x40:
                 return msg
+        if pending:
+            raise ResponsePending("ECU asked to wait: %r" % reply)
         raise NoData("unexpected reply %r" % reply)
 
     def read_did(self, header, did):
@@ -366,8 +374,18 @@ class Elm327:
         freeze frame the ECU stored when the DTC was set. Returns the raw
         positive response (59 04 ...). Record 0xFF = all records."""
         # snapshots can be long multi-frame replies over a slow BLE link
-        return self._positive(header, "1904%s%02X" % (
-            bytes(code_bytes).hex().upper(), record), timeout=8)
+        payload = "1904%s%02X" % (bytes(code_bytes).hex().upper(), record)
+        try:
+            return self._positive(header, payload, timeout=8)
+        except ResponsePending:
+            pass
+        # the ECU answered "wait" and the adapter stopped listening after
+        # its usual ~200 ms: ask again with the adapter waiting ~1 s
+        self._ok("ATSTFF")
+        try:
+            return self._positive(header, payload, timeout=10)
+        finally:
+            self._ok("ATST32")
 
     def start_session(self, header, extended=True):
         """DiagnosticSessionControl: extended (0x03) or default (0x01)."""

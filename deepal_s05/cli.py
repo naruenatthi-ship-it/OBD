@@ -737,7 +737,8 @@ def cmd_freeze(args):
               " (อ่านอย่างเดียว ไม่ลบโค้ด) กด Ctrl+C เพื่อหยุด\n"
               % len(headers))
         try:
-            _, found = scan_dtcs(elm, headers, show_all=True, quiet=True)
+            _, found = scan_dtcs(elm, headers, show_all=args.all,
+                                 quiet=True)
             if args.code:
                 wanted = {c.strip().upper() for c in args.code.split(",")}
                 found = [r for r in found if r["code"] in wanted or
@@ -1919,6 +1920,8 @@ def build_parser():
     fz.add_argument("--start")
     fz.add_argument("--end")
     fz.add_argument("--code", help="เฉพาะโค้ดนี้ เช่น P1B27-05 หรือ P1B27")
+    fz.add_argument("--all", action="store_true",
+                    help="อ่านทุกโค้ด รวมที่ไม่มีสถานะใช้งาน (ช้ามาก บางกล่องมีเป็นร้อย)")
     fz.add_argument("--save", help="บันทึกผลเป็นไฟล์ JSON")
     fz.set_defaults(func=cmd_freeze)
 
