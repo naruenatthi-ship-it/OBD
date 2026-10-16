@@ -1,7 +1,11 @@
+import base64
 import json
 import math
 import threading
+import urllib.error
 import urllib.request
+
+import pytest
 
 from deepal_s05 import autopilot, dashboard, visual
 
@@ -121,6 +125,55 @@ def test_dashboard_visual_routes(tmp_path):
         assert "ไม่มีภาพนิ่ง" in get("/freeze")
         r = urllib.request.urlopen(base + "/files/page.html")
         assert r.headers["Content-Type"].startswith("text/html")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_every_page_has_a_way_back(tmp_path):
+    # saved to an iPhone home screen there is no Safari back button
+    write(tmp_path / "drive_20261016.csv", "time,soc\n" + "".join(
+        "2026-10-16T08:%02d:00,%d\n" % (i, 80 - i) for i in range(40)))
+    write(tmp_path / "bg_20261016-0930.log", "\n".join(
+        "line %d" % i for i in range(300)))
+    write(tmp_path / "report.html", "<html><body><h1>r</h1></body></html>")
+    server = dashboard.make_server(autopilot.State([], []), "127.0.0.1", 0,
+                                   str(tmp_path), password="pw")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % server.server_address[1]
+    auth = {"Authorization": "Basic " + base64.b64encode(b"x:pw").decode()}
+
+    def get(path, headers=auth):
+        req = urllib.request.Request(base + path, headers=headers)
+        return urllib.request.urlopen(req)
+    try:
+        listing = get("/files").read().decode()
+        assert 'href="/view/drive_20261016.csv"' in listing
+        assert 'class="tabbar"' in listing
+        view = get("/view/drive_20261016.csv").read().decode()
+        assert "30 แถวแรกจาก 40 แถว" in view and 'href="/files"' in view
+        assert 'target="_blank"' in view  # download opens in a new view
+        log = get("/view/bg_20261016-0930.log").read().decode()
+        assert "line 299" in log and "line 0\n" not in log  # the tail
+        assert get("/files/drive_20261016.csv").read().startswith(b"time")
+        page = get("/files/report.html").read().decode()
+        assert page.count("data-appbar") == 1 and 'href="/files"' in page
+        tools = get("/tools").read().decode()
+        for href in ("/digest", "/health", "/cost", "/trends", "/charge",
+                     "/dyno", "/topology", "/freeze", "/files"):
+            assert 'href="%s"' % href in tools
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get("/view/nothere.csv")
+        assert e.value.code == 404
+        assert "กลับหน้าหลัก" in e.value.read().decode()
+        # the phone fetches the icon without the password
+        icon = get("/apple-touch-icon.png", {})
+        assert icon.headers["Content-Type"] == "image/png"
+        assert icon.read().startswith(b"\x89PNG")
+        manifest = json.loads(get("/manifest.webmanifest", {}).read())
+        assert manifest["display"] == "standalone"
+        with pytest.raises(urllib.error.HTTPError):
+            get("/files", {})
     finally:
         server.shutdown()
         server.server_close()

@@ -16,7 +16,7 @@ import json
 import math
 import os
 
-from . import dtc, pids
+from . import dtc, pids, ui
 from .report import nice_ticks, tick_label
 from . import snapshot
 
@@ -28,53 +28,28 @@ ECU_NAMES = {
     },
 }
 
+# page parts on top of ui.CSS (colours and cards come from there)
 CSS = """
-:root { --bg:#f2f5f4; --surface:#fff; --ink:#16211f; --muted:#5c6b68;
-  --line:#d5dddb; --s1:#0d7a70; --s2:#c2601b; --s3:#2c68b0; --s4:#8a4fb5;
-  --ok:#1f8a4c; --warn:#b7791f; --bad:#c0392b; --none:#8a9794;
-  --okbg:#e3f4ea; --warnbg:#fbf0dc; --badbg:#fbe4e1; --nonebg:#eef1f0;
-  color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0f1514; --surface:#17201e;
-  --ink:#e2eae8; --muted:#94a4a0; --line:#2b3835; --s1:#3fc0b2;
-  --s2:#f0954f; --s3:#6ea5ec; --s4:#c193e6; --ok:#4cc985; --warn:#e5b04f;
-  --bad:#f0776a; --none:#7d8a87; --okbg:#173326; --warnbg:#3a2f17;
-  --badbg:#3d1f1c; --nonebg:#1e2826; color-scheme: dark; } }
-* { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--ink);
-  font-family:"IBM Plex Sans Thai","Noto Sans Thai",Tahoma,sans-serif;
-  padding:20px 16px 40px; line-height:1.5; }
-main { max-width:1100px; margin:0 auto; display:grid; gap:16px; }
-h1 { margin:0; font-size:1.4rem; } h2 { margin:0 0 6px; font-size:1rem; }
-a { color:var(--s3); }
-.muted { color:var(--muted); font-size:.88rem; }
-.card { background:var(--surface); border:1px solid var(--line);
-  border-radius:12px; padding:14px; min-width:0; }
-.grid { display:grid; gap:16px;
+.grid { display:grid; gap:14px;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr)); }
-.stats { display:flex; flex-wrap:wrap; gap:10px; }
+.stats { display:grid; gap:10px;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,140px),1fr)); }
 .stat { background:var(--surface); border:1px solid var(--line);
-  border-radius:12px; padding:10px 14px; min-width:120px; }
-.stat b { display:block; font-size:1.5rem; font-variant-numeric:tabular-nums; }
+  border-radius:16px; padding:12px 14px; font-size:.84rem; line-height:1.35;
+  box-shadow:var(--shadow); min-width:0; }
+.stat b { display:block; font-size:1.55rem; font-weight:700; line-height:1.2;
+  font-variant-numeric:tabular-nums; }
 svg { width:100%; height:auto; display:block; }
 svg text { fill:var(--muted); font:11px ui-monospace,Menlo,Consolas,monospace; }
 svg .grid { stroke:var(--line); stroke-width:1; }
-table { border-collapse:collapse; width:100%; font-size:.88rem;
-  font-variant-numeric:tabular-nums; }
-th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
-th { color:var(--muted); font-weight:500; }
-.table { overflow-x:auto; }
+.card h2 small { color:var(--muted); font-weight:400; }
 """
 
 
 def page(title, body, now=None):
     now = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    return ('<!doctype html><html lang="th"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width, '
-            'initial-scale=1"><title>%s</title><style>%s</style></head>'
-            '<body><main><header><h1>%s</h1><div class="muted">สร้างเมื่อ %s'
-            ' · <a href="/">หน้าหลัก</a> · <a href="/files">ไฟล์</a></div>'
-            '</header>%s</main></body></html>'
-            % (html.escape(title), CSS, html.escape(title), now, body))
+    return ui.shell(title, body, back="/tools", sub="สร้างเมื่อ " + now,
+                    css=CSS)
 
 
 def num(text):

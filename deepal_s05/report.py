@@ -11,6 +11,7 @@ import re
 
 from . import analysis
 from . import snapshot
+from . import ui
 
 # (column, title, unit); the first column found in a file is used
 CHARTS = [
@@ -175,40 +176,21 @@ def summary_rows(runs, capacity):
 
 PAGE = """<!doctype html>
 <html lang="th"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Deepal S05 Charge Report</title>
-<style>
-:root { --bg:#f2f5f4; --surface:#fff; --ink:#16211f; --muted:#5c6b68;
-  --line:#d5dddb; --s1:#0d7a70; --s2:#c2601b; --s3:#2c68b0; --s4:#8a4fb5;
-  --s5:#a8892a; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0f1514; --surface:#17201e;
-  --ink:#e2eae8; --muted:#94a4a0; --line:#2b3835; --s1:#3fc0b2;
-  --s2:#f0954f; --s3:#6ea5ec; --s4:#c193e6; --s5:#d9bd5c;
-  color-scheme: dark; } }
-* { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--ink);
-  font-family:"IBM Plex Sans Thai","Noto Sans Thai",Tahoma,sans-serif;
-  padding:20px 16px 40px; line-height:1.5; }
-main { max-width:1100px; margin:0 auto; display:grid; gap:16px; }
-h1 { margin:0; font-size:1.4rem; } h2 { margin:0 0 6px; font-size:1rem; }
-.muted { color:var(--muted); font-size:.88rem; }
-.card { background:var(--surface); border:1px solid var(--line);
-  border-radius:12px; padding:14px; min-width:0; }
-.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%%,460px),1fr));
-  gap:16px; }
+<style>""" + ui.CSS.replace("%", "%%") + """
+header { padding:4px 2px 0; }
+.legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.86rem; margin:0 0 6px; }
+.legend span::before { content:""; display:inline-block; width:14px;
+  height:4px; border-radius:2px; margin-right:6px; vertical-align:middle;
+  background:var(--c); }
 svg { width:100%%; height:auto; display:block; }
 svg text { fill:var(--muted); font:11px ui-monospace,Menlo,Consolas,monospace; }
 svg .grid { stroke:var(--line); stroke-width:1; }
-.legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.88rem; }
-.legend span::before { content:""; display:inline-block; width:12px;
-  height:3px; margin-right:6px; vertical-align:middle; background:var(--c); }
-.table { overflow-x:auto; }
-table { border-collapse:collapse; width:100%%; font-size:.88rem;
-  font-variant-numeric:tabular-nums; }
-th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line);
-  white-space:nowrap; }
-th { color:var(--muted); font-weight:500; }
-</style></head><body><main>
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%%,460px),1fr));
+  gap:14px; }
+th, td { white-space:nowrap; }
+</style></head><body><main class="page">
 <header><h1>รายงานการชาร์จ Deepal S05</h1>
 <div class="muted">สร้างเมื่อ %(now)s · ความจุแบตที่ใช้คำนวณ %(cap)s kWh</div></header>
 <div class="legend">%(legend)s</div>
