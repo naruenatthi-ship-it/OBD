@@ -397,7 +397,8 @@ function render(d) {
       el.className = 'cell' + (i+1===v.cells_max_no || i+1===v.cells_min_no ? ' ext' : '') + (abn.indexOf(i)>=0 ? ' abn' : '');
     });
     document.getElementById('cellsMeta').innerHTML = '<b>'+cells.length+'</b> เซลล์ · เฉลี่ย <b>'+mean.toFixed(3)+'</b> V · สูงสุด #'+v.cells_max_no+' <b>'+f(hi,3)+'</b> · ต่ำสุด #'+v.cells_min_no+' <b>'+f(lo,3)+'</b> · ส่วนต่าง <b>'+f(delta,1)+'</b> mV' +
-      (abn.length ? ' · <span class="bad">ผิดปกติ '+abn.length+' เซลล์: '+abn.map(function(i){ return '#'+(i+1); }).join(', ')+'</span>' : '');
+      (abn.length ? ' · <span class="bad">ผิดปกติ '+abn.length+' เซลล์: '+abn.map(function(i){ return '#'+(i+1); }).join(', ')+'</span>' : '') +
+      (v.soc >= 95 && info.cell_nominal_v && info.cell_nominal_v < 3.3 ? '<br>SOC ใกล้เต็ม: แบต LFP แรงดันชันมากช่วงนี้ เซลล์จะดูห่างกันกว่าปกติ (โดยเฉพาะตอนเพิ่งชาร์จ) ให้ดูเทียบหลังพักรถ และดูว่าเซลล์ชุดเดิมต่ำซ้ำทุกครั้งหรือไม่' : '');
     document.getElementById('cellsLegend').innerHTML =
       '<span><i style="background:'+mix(tok('--mid'),tok('--low'),.85)+'"></i>ต่ำกว่าค่าเฉลี่ย</span>' +
       '<span><i style="background:'+mix(tok('--mid'),tok('--high'),.85)+'"></i>สูงกว่าค่าเฉลี่ย</span>' +
