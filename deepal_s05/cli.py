@@ -12,7 +12,7 @@ import unicodedata
 
 from . import (alerts, analysis, config, dashboard, dtc, identity, obdb,
                pids, snapshot, vehicles)
-from .elm327 import (
+from .elm327 import (ResponsePending, 
     Elm327, ElmError, NegativeResponse, NoData, response_header)
 
 STATUS_TH = {
@@ -658,6 +658,11 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
             msg = elm.read_snapshot(header, dtc.code_bytes(code))
         except NegativeResponse as e:
             item["error"] = str(e)
+            out.append(item)
+            continue
+        except ResponsePending:
+            item["error"] = ("กล่องขอให้รอ (7F 19 78) นานกว่าที่กล่อง OBD รอฟังได้"
+                             " จึงอ่านภาพนิ่งของโค้ดนี้ไม่ได้")
             out.append(item)
             continue
         except NoData as e:
