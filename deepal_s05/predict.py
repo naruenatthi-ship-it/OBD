@@ -25,6 +25,7 @@ import statistics
 from dataclasses import dataclass, field
 
 from .analysis import linear_fit
+from . import snapshot
 
 OK, WATCH, WARN, NODATA = "ok", "watch", "warn", "nodata"
 LEVEL_TEXT = {OK: "ปกติ", WATCH: "เฝ้าดู", WARN: "ควรให้ช่างตรวจ",
@@ -73,7 +74,7 @@ def read_rows(paths):
     for p in paths:
         try:
             with open(p, newline="", encoding="utf-8") as f:
-                rows.extend(csv.DictReader(f))
+                rows.extend(csv.DictReader(snapshot.no_nul(f)))
         except (OSError, csv.Error):
             continue
     return rows
@@ -100,7 +101,7 @@ def read_drive(folder, patterns=("drive_*.csv",), days=90, cell_every=10):
     for p in sorted(paths):
         try:
             with open(p, newline="", encoding="utf-8") as f:
-                for n, r in enumerate(csv.DictReader(f)):
+                for n, r in enumerate(csv.DictReader(snapshot.no_nul(f))):
                     slim = {k: r.get(k) for k in SLIM_KEYS if r.get(k)}
                     soc = num(r.get("soc"))
                     if n % cell_every == 0 or (soc is not None and soc >= 95):

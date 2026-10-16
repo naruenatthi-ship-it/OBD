@@ -17,6 +17,7 @@ import statistics
 import time
 import urllib.request
 from dataclasses import dataclass, replace
+from . import snapshot
 
 OK, INFO, WARN, CRIT = 0, 1, 2, 3
 LEVEL_ICON = {OK: "✅", INFO: "ℹ️", WARN: "⚠️", CRIT: "🔴"}
@@ -92,7 +93,7 @@ def load_baselines(path, min_rows=3):
     checkup_history.csv, for keys with at least `min_rows` readings."""
     try:
         with open(path, newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f))
+            rows = list(csv.DictReader(snapshot.no_nul(f)))
     except OSError:
         return {}
     out = {}

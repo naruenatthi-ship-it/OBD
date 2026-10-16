@@ -67,6 +67,8 @@ class Survey:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.state, f)
+            f.flush()
+            os.fsync(f.fileno())  # the car may cut the power any moment
         os.replace(tmp, self.path)  # never a half-written state
         self.mtime = os.path.getmtime(self.path)
         self.last_save = self.clock()
@@ -172,6 +174,8 @@ class Survey:
             w.writerow([_now(), header, "%04X" % did, len(raw),
                         "(ซ่อน)" if did in self.private else
                         raw.hex().upper()])
+            f.flush()
+            os.fsync(f.fileno())  # hits are rare; keep each one
 
 
 def _now():

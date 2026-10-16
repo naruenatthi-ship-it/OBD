@@ -152,3 +152,15 @@ def test_autopilot_sends_new_warnings_after_a_drive(tmp_path):
     pilot.run_predict()
     pilot.run_predict()  # nothing new the second time
     assert len(n.sent) == 1 and "P1A89-00" in n.sent[0][1]
+
+
+def test_recordings_cut_by_a_power_loss_still_read(tmp_path):
+    """A Pi that loses power mid-write can leave NUL bytes in a CSV."""
+    from deepal_s05 import visual
+    path = tmp_path / "drive_20261016.csv"
+    path.write_bytes(b"time,soc,pack_current\r\n"
+                     b"2026-10-16T18:08:34,90,-1\r\n" + b"\x00" * 64 +
+                     b"2026-10-16T18:10:47,91,-1\r\n")
+    rows = predict.read_drive(str(tmp_path), days=100000)
+    assert [r["soc"] for r in rows] == ["90", "91"]
+    assert len(visual.read_csv(str(path))) == 2

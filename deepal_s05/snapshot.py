@@ -10,6 +10,14 @@ from . import pids
 from .elm327 import ElmError, NegativeResponse, NoData
 
 
+def no_nul(lines):
+    """Lines of a CSV file without NUL bytes. When the car cuts the Pi's
+    power mid-write, the file system can leave a run of zero bytes in a
+    recording, and the csv module then refuses the whole file."""
+    for line in lines:
+        yield line.replace("\0", "") if "\0" in line else line
+
+
 def read_signals(elm, signals, capacity):
     """Read each DID once and decode every signal that uses it.
     Returns {key: (raw_bytes_or_None, value_or_None, error_or_None)}."""
@@ -183,7 +191,7 @@ class CsvLog:
     def _add_columns(self, missing):
         self.file.close()
         with open(self.path, newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f))
+            rows = list(csv.DictReader(no_nul(f)))
         fields = list(self.writer.fieldnames) + missing
         with open(self.path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fields, restval="")
@@ -197,7 +205,7 @@ class CsvLog:
         header = None
         try:
             with open(self.path, newline="", encoding="utf-8") as f:
-                header = next(csv.reader(f), None)
+                header = next(csv.reader(no_nul(f)), None)
         except OSError:
             pass
         self.file = open(self.path, "a", newline="", encoding="utf-8")

@@ -10,6 +10,7 @@ import os
 import re
 
 from . import analysis
+from . import snapshot
 
 # (column, title, unit); the first column found in a file is used
 CHARTS = [
@@ -41,7 +42,7 @@ def num(text):
 
 def load_run(path):
     with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+        reader = csv.DictReader(snapshot.no_nul(f))
         columns = list(reader.fieldnames or [])
         rows = list(reader)
     label = next((r["label"] for r in rows if r.get("label")), "") or \
@@ -271,7 +272,7 @@ ZONE_LABEL = {"top": "SOC ≥ 95%", "low": "SOC ≤ 25%", "mid": "SOC กลา�
 def _read_rows(path):
     try:
         with open(path, newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f))
+            rows = list(csv.DictReader(snapshot.no_nul(f)))
     except OSError:
         return []
     for r in rows:

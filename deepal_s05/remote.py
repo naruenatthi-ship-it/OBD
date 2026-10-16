@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import re
+from . import snapshot
 
 ARRAY_KEY = re.compile(r"^(cells|temps)_(\d+)$")
 
@@ -28,7 +29,7 @@ class LatestFile:
         path = max(paths, key=os.path.getmtime)
         last = None
         with open(path, newline="", encoding="utf-8") as f:
-            for last in csv.DictReader(f):
+            for last in csv.DictReader(snapshot.no_nul(f)):
                 pass
         return last
 

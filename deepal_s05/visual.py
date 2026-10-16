@@ -18,6 +18,7 @@ import os
 
 from . import dtc, pids
 from .report import nice_ticks, tick_label
+from . import snapshot
 
 # ECUs whose job is confirmed on a real car (see docs/TODO.md)
 ECU_NAMES = {
@@ -91,7 +92,7 @@ def latest(folder, pattern):
 
 def read_csv(path):
     with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        return list(csv.DictReader(snapshot.no_nul(f)))
 
 
 # ---------------------------------------------------------------- charts

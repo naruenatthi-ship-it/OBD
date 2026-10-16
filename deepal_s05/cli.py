@@ -442,7 +442,7 @@ def cmd_health(args):
     previous = None
     try:
         with open(args.history, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
+            for row in csv.DictReader(snapshot.no_nul(f)):
                 if row.get("zone") == result["zone"]:
                     previous = row
     except OSError:
@@ -786,7 +786,7 @@ def append_row(path, row):
     header = []
     try:
         with open(path, newline="", encoding="utf-8") as f:
-            header = next(csv.reader(f), []) or []
+            header = next(csv.reader(snapshot.no_nul(f)), []) or []
     except OSError:
         pass
     missing = [k for k in clean if k not in header]
@@ -811,7 +811,7 @@ def soc_zone(soc):
 def read_last_row(path):
     try:
         with open(path, newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f))
+            rows = list(csv.DictReader(snapshot.no_nul(f)))
     except OSError:
         return None, []
     return (rows[-1] if rows else None), rows
@@ -1475,7 +1475,7 @@ def cmd_trip(args):
     for path in files:
         try:
             with open(path, newline="", encoding="utf-8") as f:
-                rows.extend(csv.DictReader(f))
+                rows.extend(csv.DictReader(snapshot.no_nul(f)))
         except OSError as e:
             print("อ่าน %s ไม่ได้: %s" % (path, e))
     trips = analysis.trip_summaries(rows, gap_s=args.gap * 60)

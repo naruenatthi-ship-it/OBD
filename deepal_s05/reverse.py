@@ -3,6 +3,7 @@ compare two scans, and find bytes that move together with a known value."""
 
 import csv
 import math
+from . import snapshot
 
 INTERPRETATIONS = [
     # name, byte width, decoder(data, pos) -> int
@@ -19,7 +20,7 @@ def read_scan(path):
     """discover CSV -> {(header, did): bytes}."""
     out = {}
     with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        for row in csv.DictReader(snapshot.no_nul(f)):
             out[(row["header"].upper(), row["did"].upper())] = \
                 bytes.fromhex(row["raw"])
     return out
@@ -167,7 +168,7 @@ def moving_bytes(rows, did_keys):
 def read_record(path):
     """record CSV -> (rows, did_keys); DID columns hold hex strings."""
     with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+        reader = csv.DictReader(snapshot.no_nul(f))
         fields = reader.fieldnames or []
         did_keys = [c for c in fields if c.startswith("did_")]
         rows = []

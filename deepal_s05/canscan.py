@@ -12,6 +12,7 @@ diagnostics.
 
 import csv
 import time
+from . import snapshot
 
 # 11-bit ids in blocks of 32 (filter xx0/xx0, mask 7E0)
 BLOCK = 0x20
@@ -121,7 +122,7 @@ def save(path, rows):
 
 def load(path):
     with open(path, newline="", encoding="utf-8") as f:
-        return {r["id"]: r for r in csv.DictReader(f)}
+        return {r["id"]: r for r in csv.DictReader(snapshot.no_nul(f))}
 
 
 def compare(a, b):
