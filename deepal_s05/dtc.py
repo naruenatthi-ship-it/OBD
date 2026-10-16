@@ -57,8 +57,10 @@ def code_bytes(code):
 def parse_snapshot(msg, length_of):
     """59 04 DTC(3) status, then per record: record number, number of
     identifiers, (DID hi, DID lo, data)*. The data length of each DID is
-    not in the message, so `length_of(did)` must give it (or None). Bytes
-    that cannot be split go to "unparsed".
+    not in the message. `length_of(did)` gives the live length (or None);
+    ECUs often store a 1-byte value in 2 bytes here, so the length that
+    lands on the next DID wins: one in the same range (same high byte) or
+    one `length_of` knows. Bytes that cannot be split go to "unparsed".
     -> {"code", "status", "records": [{"record", "values": [(did, data)]}],
         "unparsed": bytes}"""
     if len(msg) < 6 or msg[0] != 0x59 or msg[1] != 0x04:
@@ -66,6 +68,18 @@ def parse_snapshot(msg, length_of):
     out = {"code": format_dtc(*msg[2:5]), "status": msg[5], "records": [],
            "unparsed": b""}
     body, i = msg[6:], 0
+
+    def lands(j, high, last):
+        """A sensible place for the data of a DID to end."""
+        if last:
+            if j == len(body):
+                return True
+            j += 2  # number and identifier count of the next record
+        if j + 2 > len(body):
+            return False
+        return body[j] == high or \
+            length_of(body[j] << 8 | body[j + 1]) is not None
+
     while i < len(body):
         if i + 2 > len(body):
             out["unparsed"] = body[i:]
@@ -74,12 +88,17 @@ def parse_snapshot(msg, length_of):
         count = body[i + 1]
         out["records"].append(rec)
         i += 2
-        for _ in range(count):
+        for k in range(count):
             if i + 2 > len(body):
                 break
             did = body[i] << 8 | body[i + 1]
-            n = length_of(did)
-            if n is None or i + 2 + n > len(body):
+            hint = length_of(did)
+            sizes = ([hint] if hint else []) + [2, 1, 4, 3, 5, 6, 7, 8]
+            n = next((n for n in sizes if i + 2 + n <= len(body) and
+                      lands(i + 2 + n, body[i], k == count - 1)), None)
+            if n is None and hint and i + 2 + hint <= len(body):
+                n = hint  # nothing lines up: trust the live length
+            if n is None:
                 out["unparsed"] = body[i:]
                 return out
             rec["values"].append((did, body[i + 2:i + 2 + n]))

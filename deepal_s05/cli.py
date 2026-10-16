@@ -664,10 +664,11 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
             item["error"] = "ไม่ตอบ (%s)" % e
             out.append(item)
             continue
-        except ElmError as e:  # timeout: skip this code, keep going
-            item["error"] = "ไม่ตอบในเวลาที่รอ (%s)" % e
+        except ElmError as e:  # timeout, lost frame: skip this code
+            item["error"] = "อ่านไม่สำเร็จ (%s)" % e
             out.append(item)
             continue
+        item["raw"] = msg.hex().upper()
         try:
             snap = dtc.parse_snapshot(msg, length_of)
         except ValueError as e:
@@ -683,6 +684,10 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
                     v["raw"] = "(ซ่อน)"
                 sig = by_did.get(did)
                 if sig and did not in PRIVATE_DIDS:
+                    # a 1-byte value stored in 2 bytes: use the low end
+                    if sig.min_len and len(data) > sig.min_len and \
+                            not any(data[:len(data) - sig.min_len]):
+                        data = data[len(data) - sig.min_len:]
                     v.update(key=sig.key, label=sig.label, unit=sig.unit,
                              value=sig.value(data, capacity))
                 values.append(v)
@@ -690,6 +695,9 @@ def read_freeze_frames(elm, header, codes, signals, capacity):
                                     "values": values})
         if snap["unparsed"]:
             item["unparsed"] = snap["unparsed"].hex().upper()
+        if any(did in PRIVATE_DIDS for rec in snap["records"]
+               for did, _ in rec["values"]):
+            item["raw"] = "(ซ่อน: มีเลขประจำรถ)"
         out.append(item)
     return out
 
@@ -718,6 +726,7 @@ def print_freeze(item):
                 print("     DID %s  %s" % (v["did"], v["raw"]))
     if item.get("unparsed"):
         print("   ข้อมูลที่แยกไม่ได้: %s" % item["unparsed"])
+        print("   ค่าดิบทั้งหมด: %s" % item.get("raw", ""))
 
 
 def cmd_freeze(args):

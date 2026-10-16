@@ -151,7 +151,12 @@ def assemble_isotp(frames):
         elif kind == 1:  # first frame
             expected = ((frame[0] & 0x0F) << 8) | frame[1]
             buf = bytearray(frame[2:])
+            seq = 1
         elif kind == 2 and buf is not None:  # consecutive frame
+            if frame[0] & 0x0F != seq:  # a frame was lost on the way
+                raise ElmError("multi-frame response is missing frame %d"
+                               % seq)
+            seq = (seq + 1) & 0x0F
             buf.extend(frame[1:])
             if len(buf) >= expected:
                 messages.append(bytes(buf[:expected]))

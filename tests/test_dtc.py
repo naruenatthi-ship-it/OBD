@@ -72,10 +72,16 @@ def test_parse_snapshot():
 
 
 def test_parse_snapshot_unknown_length_and_empty():
+    # the last DID takes the rest of the record
     msg = bytes.fromhex("59041B270589" "01" "02" "F229" "1773" "ABCD" "0102")
     snap = dtc.parse_snapshot(msg, {0xF229: 2}.get)
-    assert snap["records"][0]["values"] == [(0xF229, b"\x17\x73")]
-    assert snap["unparsed"] == bytes.fromhex("ABCD0102")
+    assert snap["records"][0]["values"] == [(0xF229, b"\x17\x73"),
+                                            (0xABCD, b"\x01\x02")]
+    # nothing lines up for an unknown DID: the rest stays unparsed
+    msg = bytes.fromhex("59041B270589" "01" "03" "F229" "1773" "ABCD" +
+                        "11" * 9)
+    snap = dtc.parse_snapshot(msg, {0xF229: 2}.get)
+    assert snap["unparsed"] == bytes.fromhex("ABCD" + "11" * 9)
     empty = dtc.parse_snapshot(bytes.fromhex("59041B270589"), {}.get)
     assert empty["records"] == [] and empty["unparsed"] == b""
     with pytest.raises(ValueError):
@@ -121,7 +127,7 @@ def test_read_freeze_frames_decodes_known_and_hides_vin():
     car = vehicles.deepal_s05()
     out = cli.read_freeze_frames(elm, "7A1", ["P1B27-05", "P1B53-05",
                                               "B1414-11"], car.signals, 56.1)
-    assert "ไม่ตอบในเวลา" in out[2]["error"]  # a timeout skips one code
+    assert "อ่านไม่สำเร็จ" in out[2]["error"]  # a timeout skips one code
     values = out[0]["records"][0]["values"]
     current = values[0]
     assert current["key"] == car.signal("pack_current").key
@@ -156,3 +162,54 @@ def test_freeze_command_over_fake_adapter(tmp_path, capsys):
     assert frame["code"] == "P1B27-05"
     assert frame["records"][0]["values"][0]["key"] == "pack_current"
     assert "กระแส" in capsys.readouterr().out
+
+
+# P1B27-05 from the BMS of a Thai S05 (2026-10-16): every DID stored in
+# 2 bytes, although F22F (SOC) reads as 1 byte live
+P1B27_BODY = ("011A" "F228105E" "F229129D" "F22F005A" "F22B0000" "F22D0003"
+              "F22E0001" "F23001D8" "F23101D8" "F2330166" "F2340166"
+              "F2350048" "F236029E" "F237029E" "F2380094" "F2390037"
+              "F23A0053" "F23B0001" "F2500DBE" "F2510D96" "F2520051"
+              "F253004D" "F2540024" "F255006F" "F2560013" "F257000A"
+              "F2590000")
+
+
+def test_parse_snapshot_finds_lengths_from_the_next_did():
+    msg = bytes.fromhex("59041B270509" + P1B27_BODY)
+    snap = dtc.parse_snapshot(msg, {0xF22F: 1}.get)  # live length is wrong
+    values = dict(snap["records"][0]["values"])
+    assert len(values) == 26 and snap["unparsed"] == b""
+    assert values[0xF22F] == b"\x00\x5A" and values[0xF259] == b"\x00\x00"
+
+
+def test_freeze_decodes_one_byte_values_stored_in_two():
+    from deepal_s05 import cli, vehicles
+
+    class Elm:
+        def read_snapshot(self, header, code_bytes, record=0xFF):
+            return bytes.fromhex("59041B270509" + P1B27_BODY)
+
+        def read_did(self, header, did):
+            from deepal_s05.elm327 import NegativeResponse
+            if did >> 8 != 0xF2:
+                raise NegativeResponse(0x22, 0x31)
+            return b"\x5A" if did == 0xF22F else b"\x00\x00"
+    car = vehicles.deepal_s05()
+    out = cli.read_freeze_frames(Elm(), "7A1", ["P1B27-05"], car.signals,
+                                 56.1)
+    got = {v.get("key"): v.get("value")
+           for v in out[0]["records"][0]["values"]}
+    assert got["soc"] == 90 and got["pack_current"] == -125
+    assert got["pack_voltage"] == 419 and got["batt_temp_max"] == 41
+    assert got["cell_v_max"] == 3.518
+    assert out[0]["raw"].startswith("59041B2705")
+
+
+def test_isotp_lost_frame_is_an_error():
+    from deepal_s05.elm327 import ElmError, assemble_isotp
+    ff = bytes.fromhex("100C59041B270589")
+    cf1 = bytes.fromhex("210101F2291773")
+    cf2 = bytes.fromhex("2200000000000000")
+    assert assemble_isotp([ff, cf1])[0][:6] == bytes.fromhex("59041B270589")
+    with pytest.raises(ElmError):
+        assemble_isotp([ff, cf2])
