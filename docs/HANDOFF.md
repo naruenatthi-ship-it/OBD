@@ -42,6 +42,8 @@
   `survey.json` ผลลง `survey_results.csv` · timeout 5 ครั้งติด = กล่อง OBD หลุด (คืน DID แล้วต่อใหม่) · `obd stop` ตั้ง
   `pause_until_wake` = เวลา → ปลดเมื่อเห็นรถหลับ หรือ Pi บูตหลังเวลานั้น · ยังไม่ได้ลองกับรถ
   · ทั้งหมด 18 กล่อง × 65,536 = 1.18 ล้าน DID ที่ ~300/นาที ≈ 65 ชม.ที่รถเปิดจอด (ชาร์จค้างคืนช่วยมาก)
+- แจ้งเตือนชาร์จ DC: `pids.derived` ใส่ `dc_charge_soc`/`dc_charge_temp` เมื่อกระแส < −40 A กฎใน `DEEPAL_RULES`
+  · เจ้าของรับทราบวิธีดูแลแบต (ร้อน, DC ถึง 80–85%, AC เต็มสัปดาห์ละครั้ง) และตัดสินใจไม่สั่งบาลานซ์เอง (คงอ่านอย่างเดียว)
 - `obd telegram TOKEN` / `obd telegram`: บันทึก `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` ลง
   `/etc/default/deepal-obd` (chmod 640) หาเลขแชตจาก getUpdates ส่งข้อความทดสอบ แล้ว restart บริการ
   · ยังไม่เคยลองกับบอทจริง (ในเทสต์ใช้ API ปลอม) · ต้อง `obd update` ก่อน

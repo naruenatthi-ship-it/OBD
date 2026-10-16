@@ -162,6 +162,11 @@ LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "motor_torque", "odometer_km"]
 
 
+# Above this charging current (A into the pack) it is a DC fast charge:
+# home AC at 32 A x 230 V gives at most about 18 A at 400 V
+DC_CHARGE_A = 40
+
+
 def derived(values):
     """Values computed from other signals; `values` maps key -> value."""
     out = {}
@@ -177,6 +182,14 @@ def derived(values):
     rpm = values.get("motor_rpm")
     if isinstance(rpm, (int, float)):
         out["speed_kmh"] = abs(rpm) / RPM_PER_KMH
+    # fast (DC) charging: more than AC can push into the pack (charging is
+    # negative on the S05); copies of SOC and pack temperature that only
+    # exist then, so the alert rules can warn about them
+    if i is not None and i < -DC_CHARGE_A:
+        if values.get("soc") is not None:
+            out["dc_charge_soc"] = values["soc"]
+        if values.get("batt_temp_max") is not None:
+            out["dc_charge_temp"] = values["batt_temp_max"]
     # insulation resistance per volt of pack voltage, the unit safety
     # standards use (ISO 6469-3: at least 100 ohm/V on the DC side)
     r = values.get("insulation_kohm")

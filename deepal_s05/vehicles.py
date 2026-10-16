@@ -89,6 +89,15 @@ DEEPAL_RULES = [
     {"key": "inverter_temp", "label": "อุณหภูมิอินเวอร์เตอร์", "unit": "°C",
      "warn_above": 85, "critical_above": 100,
      "advice": "อินเวอร์เตอร์ (IPU) ร้อนผิดปกติ ลดการขับหนัก และเช็กระบบน้ำหล่อเย็น"},
+    # DC fast charging care: above ~85 % it is slow and hot, and the BMS
+    # set P1B27-05 on this car at -125 A, SOC 90 %, 41 C
+    {"key": "dc_charge_soc", "label": "SOC ระหว่างชาร์จเร็ว DC", "unit": "%",
+     "warn_above": 84.5,
+     "advice": "ถึง 85% แล้ว หยุดชาร์จ DC ได้ ช่วงที่เหลือช้า ร้อน และเปลืองแบต"
+               " (ชาร์จเต็มที่บ้านด้วย AC ดีกว่า)"},
+    {"key": "dc_charge_temp", "label": "แบตร้อนระหว่างชาร์จเร็ว DC",
+     "unit": "°C", "warn_above": 40, "critical_above": 45,
+     "advice": "แบตร้อนขณะชาร์จ DC ถ้าไม่รีบ หยุดชาร์จหรือพอที่ 80% แล้วให้แบตเย็นลง"},
 ]
 
 

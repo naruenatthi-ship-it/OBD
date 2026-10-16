@@ -296,3 +296,20 @@ def test_telegram_needs_token(monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     with pytest.raises(SystemExit):
         cli.main(["--telegram", "42", "notify-test"])
+
+
+def test_dc_charging_care_alerts():
+    from deepal_s05 import pids, vehicles
+    rules = alerts.merge_rules(alerts.DEFAULT_RULES,
+                               vehicles.deepal_s05().rule_overrides)
+
+    def check(soc, current, temp):
+        values = {"soc": soc, "pack_current": current, "pack_voltage": 400,
+                  "batt_temp_max": temp}
+        values.update(pids.derived(values))
+        return {a.key: a.level for a in alerts.evaluate(values, rules)}
+    assert check(86, -120, 38) == {"dc_charge_soc": alerts.WARN}
+    assert check(70, -120, 42) == {"dc_charge_temp": alerts.WARN}
+    assert check(70, -120, 46)["dc_charge_temp"] == alerts.CRIT
+    assert check(95, -16, 42) == {}      # home AC charging: fine
+    assert check(95, 30, 42) == {}       # driving
