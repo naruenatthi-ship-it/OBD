@@ -54,8 +54,10 @@ def test_odometer_from_gateway():
 
 def test_trip_compares_with_the_odometer():
     from deepal_s05 import analysis
-    rows = [{"time": "2026-10-17T08:%02d:00" % m, "speed_kmh": "60",
-             "pack_power_kw": "10", "odometer_km": str(42817.4 + m)}
-            for m in range(11)]
+    rows = [{"time": "2026-10-17T08:%02d:%02d" % (k // 2, k % 2 * 30),
+             "speed_kmh": "60", "pack_power_kw": "10",
+             "odometer_km": str(42817.4 + k / 2)}
+            for k in range(21)]  # 10 minutes at 60 km/h, every 30 s
     (trip,) = analysis.trip_summaries(rows)
-    assert trip["km"] == 10.0 and trip["km_odometer"] == 10.0
+    assert trip["km"] == pytest.approx(10.0)
+    assert trip["km_odometer"] == pytest.approx(10.0)
