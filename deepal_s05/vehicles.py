@@ -102,7 +102,7 @@ def deepal_s05(**_):
     return Vehicle(
         key="deepal-s05", name="Deepal S05", protocol="6",
         signals=list(pids.SIGNALS + pids.CELL_SIGNALS + pids.TEMP_SIGNALS +
-                     pids.MOTOR_SIGNALS),
+                     pids.MOTOR_SIGNALS + pids.ODOMETER_SIGNALS),
         live_keys=list(pids.LIVE_KEYS), groups=groups,
         status_keys=["motor_temp", "inverter_temp"],
         rule_overrides=list(DEEPAL_RULES),

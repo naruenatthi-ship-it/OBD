@@ -416,6 +416,12 @@ def _num(text):
         return None
 
 
+def _odo_km(samples):
+    """Distance on the odometer over a trip, when it was read."""
+    odo = [s["odo"] for s in samples if s.get("odo")]
+    return odo[-1] - odo[0] if len(odo) >= 2 else None
+
+
 def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
     """Split drive-log rows (dicts from drive_*.csv) into trips at gaps of
     more than `gap_s` seconds and total distance, energy and peaks.
@@ -442,6 +448,7 @@ def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
         if speed is None or power is None:
             continue
         sample = {"t": t, "time": row["time"], "speed": speed, "power": power,
+                  "odo": _num(row.get("odometer_km")),
                   "soc": _num(row.get("soc")),
                   "motor": _num(row.get("motor_temp")),
                   "inverter": _num(row.get("inverter_temp")),
@@ -477,5 +484,6 @@ def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
             "max_kmh": peak("speed"), "max_kw": peak("power"),
             "soc_start": s[0]["soc"], "soc_end": s[-1]["soc"],
             "motor_max": peak("motor"), "inverter_max": peak("inverter"),
+            "km_odometer": _odo_km(s),
             "batt_max": peak("batt")})
     return out

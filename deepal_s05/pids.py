@@ -144,10 +144,21 @@ MOTOR_SIGNALS = [
            CANDIDATE, lambda d, c: _u16(d), header=MOTOR_HEADER),
 ]
 
+# Odometer, 0.1 km. Found by a DID scan of every ECU on a Thai S05
+# (2026-10-16 17:06): ECU 700 F1AE = 8E 88 06 00 (little endian) and the
+# radars 753/754 F1F5 = 06 88 8E (big endian), both 42,817.4 km, between
+# the dashboard reading that morning (42,769) and later in the day; the
+# telematics box keeps the same unit in its snapshots (706 F308/F309).
+ODOMETER_SIGNALS = [
+    Signal("odometer_km", "เลขไมล์", 0xF1AE, "km", 4, CANDIDATE,
+           lambda d, c: int.from_bytes(d[:4], "little") / 10,
+           "700 F1AE (ตรงกับ 753/754 F1F5) รอเทียบกับหน้าปัด", header="700"),
+]
+
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
              "charge_temp", "motor_temp", "inverter_temp", "motor_rpm",
-             "motor_torque"]
+             "motor_torque", "odometer_km"]
 
 
 def derived(values):

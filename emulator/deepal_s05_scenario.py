@@ -137,6 +137,9 @@ ObdMessage = {
                           MOTOR_RSP),
         "MOTOR_DCV": entry("DC link voltage", "FD1A", "01 8E", MOTOR_REQ,
                            MOTOR_RSP),
+        # Gateway 700: odometer 42,817.4 km, 0.1 km little endian, as on
+        # the real car
+        "ODOMETER": entry("Odometer", "F1AE", "8E 88 06 00", "700", "708"),
         "MOTOR_OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31",
                              MOTOR_REQ, MOTOR_RSP),
         # Any other DID: requestOutOfRange, like a real ECU

@@ -23,6 +23,7 @@ LABELS = {
     "aux_12v": ("แบต 12V", "V"),
     "insulation_ohm_per_v": ("ฉนวน", "Ω/V"),
     "speed_kmh": ("ความเร็ว", "km/h"),
+    "odometer_km": ("เลขไมล์", "km"),
 }
 
 

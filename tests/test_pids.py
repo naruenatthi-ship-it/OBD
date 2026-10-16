@@ -43,3 +43,19 @@ def test_derived():
     assert out["pack_power_kw"] == pytest.approx(3.5)
     assert out["cell_delta_mv"] == pytest.approx(3.0)
     assert out["temp_delta_c"] == 2
+
+
+def test_odometer_from_gateway():
+    from deepal_s05 import vehicles
+    sig = vehicles.deepal_s05().signal("odometer_km")
+    assert sig.header == "700" and sig.did == 0xF1AE
+    assert sig.value(bytes.fromhex("8E880600")) == 42817.4
+
+
+def test_trip_compares_with_the_odometer():
+    from deepal_s05 import analysis
+    rows = [{"time": "2026-10-17T08:%02d:00" % m, "speed_kmh": "60",
+             "pack_power_kw": "10", "odometer_km": str(42817.4 + m)}
+            for m in range(11)]
+    (trip,) = analysis.trip_summaries(rows)
+    assert trip["km"] == 10.0 and trip["km_odometer"] == 10.0

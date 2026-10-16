@@ -1492,6 +1492,13 @@ def cmd_trip(args):
             fmt(round(t["max_kmh"])), fmt(round(t["max_kw"])),
             "%s→%s" % (fmt(t["soc_start"]), fmt(t["soc_end"])),
             "%s/%s" % (fmt(t["motor_max"]), fmt(t["inverter_max"]))))
+    checked = [t for t in trips[-args.last:] if t.get("km_odometer")]
+    if checked:
+        calc = sum(t["km"] for t in checked)
+        odo = sum(t["km_odometer"] for t in checked)
+        print("\nเทียบเลขไมล์ %d ทริป: คำนวณจากรอบมอเตอร์ %.1f km, เลขไมล์ %.1f km"
+              " (ต่างกัน %+.1f%%)" % (len(checked), calc, odo,
+                                     (calc - odo) / odo * 100 if odo else 0))
     total_km = sum(t["km"] for t in trips)
     total_kwh = sum(t["kwh"] for t in trips)
     print("\nรวม %d ทริป %.1f km ใช้ %.2f kWh เฉลี่ย %.1f kWh/100 km"
