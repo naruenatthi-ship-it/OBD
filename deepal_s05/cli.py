@@ -1506,6 +1506,41 @@ def cmd_predict(args):
     return 0
 
 
+def cmd_clean(args):
+    import shutil
+    from . import datafiles
+    plan = datafiles.cleanup_plan(args.dir, log_days=args.log_days,
+                                  snapshot_days=args.snapshot_days)
+    items = datafiles.entries(args.dir)
+    total = sum(e["size"] for e in items)
+    print("โฟลเดอร์ข้อมูล: %d ไฟล์ รวม %s · การ์ดเหลือที่ว่าง %s" % (
+        len(items), datafiles.human_size(total),
+        datafiles.human_size(shutil.disk_usage(args.dir).free)))
+    if not plan:
+        print("ไม่มีไฟล์ที่ควรลบ")
+        return 0
+    print("\nลบได้ %d ไฟล์ (%s):" % (len(plan), datafiles.human_size(
+        sum(size for _, size, _ in plan))))
+    for name, size, reason in plan:
+        print("  %-40s %9s  %s" % (name, datafiles.human_size(size), reason))
+    print("\nไม่แตะ: ไฟล์บันทึกขับ/ชาร์จ/สแกน และไฟล์ประวัติ (ใช้ทำเตือนล่วงหน้าและกราฟ)")
+    if not args.yes:
+        try:
+            answer = input("ลบเลยไหม? พิมพ์ y แล้วกด Enter: ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("ไม่ได้ลบอะไร")
+            return 0
+    for name, _, _ in plan:
+        try:
+            os.remove(os.path.join(args.dir, name))
+        except OSError as e:
+            print("ลบ %s ไม่ได้: %s" % (name, e))
+    print("ลบแล้ว")
+    return 0
+
+
 def cmd_correlate(args):
     from . import reverse
     rows, did_keys = reverse.read_record(args.file)
@@ -1975,6 +2010,14 @@ def build_parser():
     pr.add_argument("--out", help="สร้างหน้า HTML ด้วย")
     pr.set_defaults(func=cmd_predict)
 
+    cl = sub.add_parser("clean",
+                        help="ลบไฟล์ที่ไม่จำเป็นในโฟลเดอร์ข้อมูล (ถามก่อนลบ)")
+    cl.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    cl.add_argument("--log-days", type=int, default=7)
+    cl.add_argument("--snapshot-days", type=int, default=90)
+    cl.add_argument("--yes", action="store_true", help="ลบเลยไม่ต้องถาม")
+    cl.set_defaults(func=cmd_clean)
+
     nt = sub.add_parser("notify-test",
                         help="ส่งข้อความทดสอบไป ntfy/Telegram"
                              " (และบอกเลข chat ของ Telegram)")
@@ -1999,7 +2042,7 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
-               cmd_visual, cmd_predict)
+               cmd_visual, cmd_predict, cmd_clean)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

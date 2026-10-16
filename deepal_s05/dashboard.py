@@ -97,31 +97,56 @@ class Poller(threading.Thread):
 
 def list_files(data_dir):
     """Data files offered for download: (name, size), newest first."""
-    out = []
-    for name in os.listdir(data_dir):
-        path = os.path.join(data_dir, name)
-        if os.path.isfile(path) and name.endswith((".csv", ".json", ".log",
-                                                   ".html")):
-            out.append((name, os.path.getsize(path), os.path.getmtime(path)))
-    out.sort(key=lambda f: -f[2])
-    return [(n, size) for n, size, _ in out]
+    from . import datafiles
+    return [(e["name"], e["size"]) for e in datafiles.entries(data_dir)]
+
+
+KIND_NOTE = {"history": "ประวัติ ห้ามลบ", "page": "หน้ารายงาน",
+             "log": "log", "snapshot": "", "data": ""}
 
 
 def files_page(data_dir):
-    rows = "".join(
-        '<li><a href="/files/%s">%s</a> <small>%.1f KB</small></li>' % (
-            urllib.parse.quote(n), html.escape(n), size / 1024)
-        for n, size in list_files(data_dir))
+    import shutil
+    from . import datafiles
+    items = datafiles.entries(data_dir)
+    total = sum(e["size"] for e in items)
+    try:
+        free = datafiles.human_size(shutil.disk_usage(data_dir).free)
+    except OSError:
+        free = "-"
+    parts, day = [], None
+    for e in items:
+        d = e["time"].date()
+        if d != day:
+            if day is not None:
+                parts.append("</ul>")
+            parts.append("<h2>%s</h2><ul>" % d.strftime("%d/%m/%Y"))
+            day = d
+        note = KIND_NOTE[e["kind"]]
+        parts.append(
+            '<li><span class="t">%s</span> <a href="/files/%s">%s</a> '
+            '<small>%s%s</small></li>' % (
+                e["time"].strftime("%H:%M"), urllib.parse.quote(e["name"]),
+                html.escape(e["name"]), datafiles.human_size(e["size"]),
+                " · " + note if note else ""))
+    if parts:
+        parts.append("</ul>")
     return ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
             'content="width=device-width, initial-scale=1"><title>Deepal S05 '
-            'Files</title><body style="font-family:sans-serif;padding:16px">'
+            'Files</title><style>body{font-family:sans-serif;padding:16px;'
+            'line-height:1.5}h2{font-size:1rem;margin:18px 0 4px}ul{margin:0;'
+            'padding-left:18px}.t{font-family:monospace;color:#667}small{'
+            'color:#667}</style><body>'
             '<h1>ไฟล์ข้อมูล</h1><p><a href="/">กลับหน้าหลัก</a> · '
             '<a href="/trends">กราฟแนวโน้ม</a> · '
             '<a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · '
             '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · '
-            '<a href="/health">เตือนล่วงหน้า</a>'
-            '</p><ul>%s</ul></body>'
-            % (rows or "<li>ยังไม่มีไฟล์</li>"))
+            '<a href="/health">เตือนล่วงหน้า</a></p>'
+            '<p><small>เรียงตามเวลาที่บันทึก ใหม่สุดอยู่บน · %d ไฟล์ รวม %s · '
+            'การ์ดเหลือที่ว่าง %s · ลบไฟล์ที่ไม่จำเป็นด้วยคำสั่ง obd clean'
+            '</small></p>%s</body>'
+            % (len(items), datafiles.human_size(total), free,
+               "".join(parts) or "<p>ยังไม่มีไฟล์</p>"))
 
 
 def read_cell_ir(path):
