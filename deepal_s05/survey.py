@@ -1,6 +1,6 @@
 """A DID survey that runs a little at a time inside the autopilot and picks
 up where it stopped, over as many car sessions as it takes: every ECU,
-every DID 0000-FFFF, read-only (UDS 22, default session).
+F000-FFFF and samples of the rest, read-only (UDS 22, default session).
 
 It only runs while the car is awake and standing still (parked with the
 car on, or charging): reading thousands of unknown DIDs from the brake,
@@ -20,8 +20,14 @@ from .elm327 import ElmError, NegativeResponse, NoData
 
 STATE_FILE = "survey.json"
 RESULTS_FILE = "survey_results.csv"
-# where live data usually is first, the rest of the DID space after
-DEFAULT_RANGES = [(0xF000, 0xFFFF), (0xD000, 0xEFFF), (0x0000, 0xCFFF)]
+# Where this car keeps its live data (everything found so far was in
+# F000-FFFF), then a few small samples of the rest: a full sweep of
+# 0000-EFFF is ~60 h of car-on time for little chance of a find (the
+# 7A4/742 scans of 0100-2FFF and D000-EFFF answered nothing)
+DEFAULT_RANGES = [(0xF000, 0xFFFF), (0x0100, 0x01FF), (0x1000, 0x10FF),
+                  (0xD000, 0xD0FF)]
+# survey.json from before: its full sweeps not yet begun become samples
+PLAN_VERSION = 2
 SAVE_EVERY_S = 60.0
 # this many timeouts in a row means the adapter, not the DID: stop and
 # read them again later
@@ -66,7 +72,27 @@ class Survey:
                 self.mtime = mtime
             except (OSError, ValueError):
                 self.state = None
+            if self.state is not None and \
+                    self.state.get("plan", 1) < PLAN_VERSION:
+                self._replan()
         return self.state is not None
+
+    def _replan(self):
+        """Keep what is done or under way and the F000-FFFF tasks; the
+        old full sweeps that have not begun give way to the samples."""
+        tasks = self.state["tasks"]
+        headers = []
+        for t in tasks:
+            if t["header"] not in headers:
+                headers.append(t["header"])
+        kept = [t for t in tasks if t["start"] == 0xF000 or
+                t["next"] > t["start"]]
+        have = {(t["header"], t["start"]) for t in kept}
+        kept += [t for t in plan(headers, DEFAULT_RANGES[1:])
+                 if (t["header"], t["start"]) not in have]
+        self.state["tasks"] = kept
+        self.state["plan"] = PLAN_VERSION
+        self.save()
 
     def save(self):
         tmp = self.path + ".tmp"
@@ -79,7 +105,8 @@ class Survey:
         self.last_save = self.clock()
 
     def start(self, headers, ranges=DEFAULT_RANGES):
-        self.state = {"tasks": plan(headers, ranges), "paused": False,
+        self.state = {"tasks": plan(headers, ranges), "plan": PLAN_VERSION,
+                      "paused": False,
                       "pause_until_wake": False, "checked": 0, "found": 0,
                       "busy_s": 0.0, "started": _now()}
         self.save()

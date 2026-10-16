@@ -212,3 +212,23 @@ def test_digest_command_sends_only_new_rows(tmp_path, capsys):
     capsys.readouterr()
     assert cli.main(["survey", "digest", "--dir", str(tmp_path)]) == 0
     assert "ไม่มีผลใหม่" in capsys.readouterr().out
+
+
+def test_old_full_sweep_becomes_samples(tmp_path):
+    # a survey.json written before: F000-FFFF under way, full sweeps after
+    s = survey.Survey(str(tmp_path), clock=Tick())
+    s.start(["700", "7A1"], [(0xF000, 0xFFFF), (0xD000, 0xEFFF),
+                             (0x0000, 0xCFFF)])
+    s.state["tasks"][0]["next"] = 0x10000      # 700 F000-FFFF done
+    s.state["tasks"][1]["next"] = 0xF123       # 7A1 half way
+    del s.state["plan"]
+    s.save()
+    s2 = survey.Survey(str(tmp_path), clock=Tick())
+    assert s2.load()
+    spans = [(t["header"], t["start"], t["end"]) for t in s2.state["tasks"]]
+    assert spans[:2] == [("700", 0xF000, 0xFFFF), ("7A1", 0xF000, 0xFFFF)]
+    assert ("700", 0xD000, 0xD0FF) in spans and ("7A1", 0x0100, 0x01FF) \
+        in spans
+    assert all(e - st < 0x100 for _, st, e in spans[2:])
+    assert s2.current()["header"] == "7A1" and s2.current()["next"] == 0xF123
+    assert s2.total() == 2 * 0x1000 + 2 * 3 * 0x100

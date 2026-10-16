@@ -2264,7 +2264,7 @@ def build_parser():
                              "until-wake", "digest"])
     su.add_argument("--dir", default=".")
     su.add_argument("--headers", help="กล่องที่จะสำรวจ (ค่าเริ่มต้น: จากไฟล์ ecus_ ล่าสุด)")
-    su.add_argument("--ranges", help="ช่วง DID (ค่าเริ่มต้น F000-FFFF,D000-EFFF,0000-CFFF)")
+    su.add_argument("--ranges", help="ช่วง DID (ค่าเริ่มต้น F000-FFFF แล้วสุ่ม 0100-01FF,1000-10FF,D000-D0FF)")
     su.add_argument("--force", action="store_true")
     su.add_argument("--file", help="digest: สรุปไฟล์นี้แทน (เช่น scan_*.csv)")
     su.add_argument("--all", action="store_true",
