@@ -1,0 +1,6 @@
+[Unit]
+Description=Prefer the phone hotspot over other WiFi (Deepal S05 OBD)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/deepal-obd/pi/hotspot-first.sh

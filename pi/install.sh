@@ -69,8 +69,12 @@ sudo rfkill unblock bluetooth || true  # some images ship it blocked
 echo "==> ติดตั้งบริการให้เริ่มเองทุกครั้งที่เปิดเครื่อง"
 sed "s/@USER@/$USER_NAME/" "$APP/pi/deepal-obd.service" | \
     sudo tee /etc/systemd/system/deepal-obd.service >/dev/null
+sudo cp "$APP/pi/deepal-hotspot.service" "$APP/pi/deepal-hotspot.timer" \
+    /etc/systemd/system/
+sudo chmod +x "$APP/pi/hotspot-first.sh"
 sudo systemctl daemon-reload
 sudo systemctl enable deepal-obd
+sudo systemctl enable --now deepal-hotspot.timer
 
 echo
 echo "ติดตั้งเสร็จแล้ว ขั้นต่อไป:"

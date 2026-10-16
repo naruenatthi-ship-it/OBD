@@ -34,7 +34,7 @@ usage() {
   bg <คำสั่ง>       สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น obd bg scan 7A4,742 0100-EFFF
   log              ดูความคืบหน้าของงานเบื้องหลังล่าสุด
   wifi             ดู WiFi ที่จำไว้และที่ต่ออยู่
-  wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (Hotspot ยังมาก่อนเสมอ)
+  wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (เปิด Hotspot เมื่อไหร่ Pi ย้ายกลับมาเอง)
   wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
   pair             จับคู่กล่อง OBD ใหม่
@@ -147,9 +147,9 @@ do_command() {
                         wifi-sec.psk "$3" connection.autoconnect-priority 5 &&
                     as_root nmcli connection modify hotspot \
                         connection.autoconnect-priority 10 2>/dev/null
-                    echo "เพิ่ม $2 แล้ว (Hotspot ยังมาก่อนเสมอถ้าเปิดอยู่)"
+                    echo "เพิ่ม $2 แล้ว เปิด Hotspot เมื่อไหร่ Pi จะย้ายกลับมาภายใน 1-2 นาที"
                     echo "ระวัง: WiFi ที่ทำงาน/ร้านค้ามักกันไม่ให้มือถือมองเห็น Pi"
-                    echo "ถ้าเข้าไม่ได้ ให้ปิด WiFi ตัวนั้นชั่วคราว Pi จะกลับมาที่ Hotspot" ;;
+                    echo "และถ้ารถดับเอง Pi ก็ดับ (งานเบื้องหลังหยุดด้วย)" ;;
                 remove|delete)
                     as_root nmcli connection delete "${2:-}" ;;
                 *)
