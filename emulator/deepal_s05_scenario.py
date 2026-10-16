@@ -1,11 +1,13 @@
 """ELM327-emulator scenario 'deepal_s05': a Deepal S05 BMS (7A1/7A9) with a
 56.1 kWh pack, answering the DIDs listed in deepal_s05/pids.py.
 
-The values are made up for testing, not recorded from a car. So are the
-per-cell DID 22F2A0, the temperature sensor DID 22F2A1, the insulation DID
-22F2A2, the trouble codes, the extended session support and the second ECU at
-761/769 (standing in for the on-board charger): they exist only to exercise
-the discover and ecus commands. The real addresses and DIDs are unknown.
+The values are made up for testing, not recorded from a car. The per-cell
+DIDs (120 cells in F29F-F2EF, F3A9-F3B0, F3E1-F3FF) and the 16 pack
+temperature DIDs (F2F0-F2FF) follow the layout found on a Thai S05 Max.
+Made up as well: the insulation DID 22F310,
+the trouble codes, the extended session support and the second ECU at
+761/769 (standing in for the on-board charger), which exist only to
+exercise the discover and ecus commands.
 
 Use it with run_emulator.py, or from the emulator prompt (started in this
 directory): merge deepal_s05_scenario, then scenario deepal_s05.
@@ -51,12 +53,31 @@ def fixed(descr, request, response_hex, req=REQ, rsp=RSP):
     }
 
 
-def cell_voltages(count=108, seed=5):
+CELL_DIDS = ([0xF29F + i for i in range(81)] + [0xF3A9 + i for i in range(8)]
+             + [0xF3E1 + i for i in range(31)])
+TEMP_DIDS = [0xF2F0 + i for i in range(16)]
+
+
+def cell_millivolts(count=120, seed=5):
     """Made-up cell voltages around 3.330 V, cell 47 low, cell 83 high."""
     rnd = random.Random(seed)
     mv = [3330 + rnd.randint(-2, 2) for _ in range(count)]
     mv[46], mv[82] = 3325, 3334
-    return " ".join("%02X %02X" % (v >> 8, v & 0xFF) for v in mv)
+    return mv
+
+
+def cell_entries():
+    out = {}
+    for n, (did, mv) in enumerate(zip(CELL_DIDS, cell_millivolts())):
+        out["CELL_%03d" % (n + 1)] = entry(
+            "Cell %d voltage (made up)" % (n + 1), "%04X" % did,
+            "%02X %02X" % (mv >> 8, mv & 0xFF))
+    temps = [69, 70, 70, 71, 69, 70, 71, 72, 70, 69, 70, 71, 72, 72, 71, 70]
+    for n, (did, raw) in enumerate(zip(TEMP_DIDS, temps)):
+        out["TEMP_%02d" % (n + 1)] = entry(
+            "Pack temperature %d (made up)" % (n + 1), "%04X" % did,
+            "%02X" % raw)
+    return out
 
 
 ObdMessage = {
@@ -82,10 +103,8 @@ ObdMessage = {
         "E_SUM": entry("Energy (experimental)", "F264", "0F A0"),
         "SOH": entry("SOH", "F27D", "0F 0F 78"),                    # 98.7 %
         "EFC": entry("EFC (experimental)", "F27F", "31 0D C8 F8"),  # 14.67
-        "CELLS": entry("Cell voltages (made up)", "F2A0", cell_voltages()),
-        "TEMPS": entry("Temperature sensors (made up)", "F2A1",
-                       "45 46 46 47 45 46 47 48 46 45 46 47 48 48 47 46"),
-        "INSULATION": entry("Insulation resistance kOhm (made up)", "F2A2",
+        **cell_entries(),
+        "INSULATION": entry("Insulation resistance kOhm (made up)", "F310",
                             "13 88"),                               # 5000
         "BMS_PART": entry("Part number", "F187", ascii_hex("DEMO-BMS-01")),
         "BMS_SW": entry("Software version", "F195", ascii_hex("V1.00")),

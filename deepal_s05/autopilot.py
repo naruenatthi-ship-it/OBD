@@ -82,6 +82,7 @@ class Autopilot:
         self.shutdown = shutdown
         self.clock = clock
         self.state = State(signals, arrays, info)
+        self.slow = snapshot.GroupCache()  # per-cell values every 30 s
         self.baselines = baselines or {}  # usual values, from checkups
         self.vehicle = vehicle  # BMS identification is read once when awake
         self.bms_read = vehicle is None
@@ -160,7 +161,7 @@ class Autopilot:
             self.awake_since = now
         try:
             snap = snapshot.take(self.elm, self.signals, self.arrays,
-                                 self.capacity)
+                                 self.capacity, slow=self.slow)
         except (ElmError, OSError) as e:
             self.disconnect()
             self.state.update(status="อ่านค่าไม่ได้ (%s)" % e)

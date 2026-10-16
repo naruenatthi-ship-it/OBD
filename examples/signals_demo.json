@@ -1,17 +1,21 @@
 {
-  "_comment": "ใช้กับตัวจำลอง (emulator/run_emulator.py) เท่านั้น DID และ header ในไฟล์นี้แต่งขึ้น ไม่ใช่ของรถจริง",
+  "_comment": "ใช้กับตัวจำลอง (emulator/run_emulator.py) เท่านั้น DID และ header ในไฟล์นี้แต่งขึ้น ไม่ใช่ของรถจริง (แรงดันรายเซลล์และอุณหภูมิในแพ็กมีในโปรแกรมแล้ว ไม่ต้องใส่ที่นี่)",
   "signals": [
-    {"key": "obc_temp", "label": "อุณหภูมิ OBC", "header": "761",
-     "did": "F2C1", "formula": "A-40", "unit": "C"},
-    {"key": "insulation_kohm", "label": "ความต้านทานฉนวน", "header": "7A1",
-     "did": "F2A2", "formula": "A*256+B", "unit": "kΩ"}
-  ],
-  "arrays": [
-    {"key": "cells", "label": "แรงดันรายเซลล์", "header": "7A1",
-     "did": "F2A0", "offset": 0, "count": 108, "bytes": 2,
-     "scale": 0.001, "unit": "V"},
-    {"key": "temps", "label": "เซนเซอร์อุณหภูมิแบต", "header": "7A1",
-     "did": "F2A1", "offset": 0, "count": 16, "bytes": 1,
-     "add": -40, "unit": "C"}
+    {
+      "key": "obc_temp",
+      "label": "อุณหภูมิ OBC",
+      "header": "761",
+      "did": "F2C1",
+      "formula": "A-40",
+      "unit": "C"
+    },
+    {
+      "key": "insulation_kohm",
+      "label": "ความต้านทานฉนวน",
+      "header": "7A1",
+      "did": "F310",
+      "formula": "A*256+B",
+      "unit": "kΩ"
+    }
   ]
 }

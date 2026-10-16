@@ -62,7 +62,7 @@ def make(tmp_path, volts, values=None, **kw):
     elm = FakeElm(volts)
     taken = []
 
-    def take(e, signals, arrays, capacity):
+    def take(e, signals, arrays, capacity, slow=None):
         taken.append(clock.t)
         return Snapshot(clock.t, dict(values or {
             "soc": 80, "pack_current": 1.0, "batt_temp_max": 30,

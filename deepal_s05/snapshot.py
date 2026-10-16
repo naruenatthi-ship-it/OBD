@@ -37,6 +37,23 @@ def read_signals(elm, signals, capacity):
     return results
 
 
+class GroupCache:
+    """Grouped signals (one DID per cell: 120+ requests) are read at most
+    every `period` seconds in continuous modes; rounds in between reuse the
+    last values so pack-level values keep updating quickly."""
+
+    def __init__(self, period=30.0, clock=time.monotonic):
+        self.period, self.clock = period, clock
+        self.last = None
+        self.results = {}
+
+    def read(self, elm, signals, capacity):
+        if self.last is None or self.clock() - self.last >= self.period:
+            self.results = read_signals(elm, signals, capacity)
+            self.last = self.clock()
+        return self.results
+
+
 def array_summary(key, values):
     """min/max/delta of an array, with 1-based positions."""
     if not values:
@@ -89,12 +106,20 @@ def apply_groups(values, errors, raw, groups):
 
 
 def take(elm, signals, arrays=(), capacity=pids.DEFAULT_CAPACITY_KWH,
-         read_12v=True):
+         read_12v=True, slow=None):
     """`arrays` holds ArraySignal (one DID, many values) and GroupArray
-    (many signals gathered into one array) objects."""
+    (many signals gathered into one array) objects. With `slow` (a
+    GroupCache) the group members are read only when it is due."""
     groups = [a for a in arrays if hasattr(a, "members")]
     did_arrays = [a for a in arrays if not hasattr(a, "members")]
-    results = read_signals(elm, signals, capacity)
+    if slow is not None and groups:
+        members = {k for g in groups for k in g.members}
+        results = read_signals(elm, [s for s in signals
+                                     if s.key not in members], capacity)
+        results.update(slow.read(elm, [s for s in signals
+                                       if s.key in members], capacity))
+    else:
+        results = read_signals(elm, signals, capacity)
     values = {k: v for k, (_, v, _) in results.items()}
     errors = {k: e for k, (_, _, e) in results.items() if e}
     raw = {k: r for k, (r, _, _) in results.items() if r is not None}

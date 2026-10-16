@@ -216,7 +216,7 @@ class Elm327:
         deadline = time.monotonic() + (timeout or self.timeout)
         data = b""
         while time.monotonic() < deadline:
-            chunk = self.ser.read(256)
+            chunk = self._read_some()
             if chunk:
                 data += chunk
                 if PROMPT in chunk:
@@ -232,6 +232,17 @@ class Elm327:
         if self.log:
             self.log("<<", reply)
         return reply
+
+    def _read_some(self):
+        """What has arrived so far. pyserial's read(n) waits for all n bytes
+        or the full timeout, so ask for what is waiting instead; the
+        socket-like ports (RFCOMM, BLE) already return what they have."""
+        waiting = getattr(self.ser, "in_waiting", None)
+        if waiting is None:
+            return self.ser.read(256)
+        chunk = self.ser.read(max(waiting, 1))
+        more = self.ser.in_waiting
+        return chunk + self.ser.read(more) if more else chunk
 
     def initialize(self):
         """Reset the adapter and set it up for the CAN protocol given at

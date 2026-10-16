@@ -64,3 +64,33 @@ def test_csv_log_and_report(tmp_path):
     assert "<h2>SOC</h2>" in page and "<h2>obc_temp</h2>" in page
     assert "cells_1" not in page and "_min" not in page
     assert "90 → 94" in page
+
+
+def test_group_cache_reads_cells_every_period():
+    from deepal_s05 import pids, snapshot, vehicles
+
+    class Elm:
+        def __init__(self):
+            self.reads = []
+
+        def read_did(self, header, did):
+            self.reads.append(did)
+            return bytes([0x0D, 0x05]) if did != 0xF22F else bytes([50])
+
+        def battery_voltage(self):
+            return 13.8
+
+    now = [0.0]
+    cache = snapshot.GroupCache(30, clock=lambda: now[0])
+    elm = Elm()
+    v = vehicles.deepal_s05()
+    sigs = [pids.SIGNALS_BY_KEY["soc"]] + pids.CELL_SIGNALS
+    snap = snapshot.take(elm, sigs, v.groups, slow=cache)
+    assert len(snap.arrays["cells"]) == 120 and len(elm.reads) == 121
+    now[0] = 10
+    snap = snapshot.take(elm, sigs, v.groups, slow=cache)
+    assert len(elm.reads) == 122  # only SOC again
+    assert len(snap.arrays["cells"]) == 120  # cells from the cache
+    now[0] = 31
+    snapshot.take(elm, sigs, v.groups, slow=cache)
+    assert len(elm.reads) == 243

@@ -79,9 +79,17 @@ def test_cli_discover_finds_cells(url, tmp_path, capsys):
     assert main(["--port", url, "discover", "--start", "F29F", "--end",
                  "F2A1", "--extended", "--save", str(out_csv)]) == 0
     out = capsys.readouterr().out
-    assert "22F2A0  216" in out
-    assert "อาจเป็นแรงดันรายเซลล์: 108 ค่า" in out
+    assert "22F29F    2 ไบต์  0D" in out
+    assert "พบ 3 DID" in out
     assert "F2A0" in out_csv.read_text(encoding="utf-8")
+
+
+def test_discover_hides_vin_on_screen(url, capsys):
+    assert main(["--port", url, "discover", "--start", "F190", "--end",
+                 "F190"]) == 0
+    out = capsys.readouterr().out
+    assert "DEMOVIN" not in out and "44 45 4D 4F" not in out
+    assert "ซ่อน" in out
 
 
 DEMO = os.path.join(os.path.dirname(__file__), "..", "examples",
@@ -92,7 +100,7 @@ def test_check_with_custom_signals(url, capsys):
     assert main(["--port", url, "--signals", DEMO, "check"]) == 0
     out = capsys.readouterr().out
     assert "อุณหภูมิ OBC" in out and " 50 C" in out
-    assert "108 ค่า" in out and "(#47)" in out and "(#83)" in out
+    assert "120 ค่า" in out and "(#47)" in out and "(#83)" in out
     assert "แบต 12V" in out
 
 
@@ -101,7 +109,7 @@ def test_charge_and_health(url, tmp_path, capsys, monkeypatch):
     assert main(["--port", url, "--signals", DEMO, "charge", "--interval",
                  "0", "--duration", "0.001", "--csv", "c.csv",
                  "--label", "16A"]) == 0
-    assert "cells_108" in (tmp_path / "c.csv").read_text(encoding="utf-8")
+    assert "cells_120" in (tmp_path / "c.csv").read_text(encoding="utf-8")
     assert main(["--port", url, "health", "--samples", "1"]) == 0
     out = capsys.readouterr().out
     assert "SOC ช่วงกลาง" in out
@@ -121,8 +129,9 @@ def test_dashboard_data(url, tmp_path):
     ir_file.write_text(json.dumps({"pack_mohm": 61, "cells": [0.4, 0.8]}))
     with Elm327(url) as elm:
         elm.initialize()
-        poller = dashboard.Poller(elm, pids.SIGNALS[:3] + signals, arrays,
-                                  56.1, interval=0.2,
+        poller = dashboard.Poller(elm, pids.SIGNALS[:3] + pids.CELL_SIGNALS +
+                                  pids.TEMP_SIGNALS + signals,
+                                  vehicle.groups + arrays, 56.1, interval=0.2,
                                   info=identity.pack_info(vehicle, 56.1),
                                   vehicle=vehicle)
         server = dashboard.make_server(poller, "127.0.0.1", 0,
@@ -131,7 +140,7 @@ def test_dashboard_data(url, tmp_path):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         poller.start()
         try:
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + 90  # first round reads 120 cells
             while True:
                 data = json.load(urllib.request.urlopen(
                     "http://127.0.0.1:%d/data" % port))
@@ -148,7 +157,7 @@ def test_dashboard_data(url, tmp_path):
             server.shutdown()
             server.server_close()
     assert data["error"] is None
-    assert len(data["arrays"]["cells"]) == 108
+    assert len(data["arrays"]["cells"]) == 120
     assert data["values"]["obc_temp"] == 50
     assert data["custom"] == ["obc_temp", "insulation_kohm"]
     assert data["values"]["insulation_kohm"] == 5000
@@ -166,7 +175,7 @@ def test_health_saves_cell_ir(url, tmp_path, capsys):
                  "1", "--ir", "3", "--cell-ir", "--min-range", "5",
                  "--history", str(history)]) == 0
     saved = json.loads((tmp_path / "cell_ir.json").read_text())
-    assert len(saved["cells"]) == 108
+    assert len(saved["cells"]) == 120
     assert "แท็บ IR" in capsys.readouterr().out
 
 

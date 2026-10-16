@@ -99,6 +99,24 @@ SIGNALS = [
 SIGNALS_BY_KEY = {s.key: s for s in SIGNALS}
 
 # Signals shown by the "live" command
+# Per-cell voltages and pack temperature sensors, found on a Thai S05 Max
+# 56.1 kWh (2026-10-16): one DID per cell, 2 bytes in mV, 120 cells in
+# three blocks (their mean x 120 matched F228 exactly), and 16 one-byte
+# temperatures (A-40, matching F252/F253). The cell numbering follows the
+# DID order and may not match the physical order in the pack.
+CELL_DIDS = (list(range(0xF29F, 0xF2F0)) + list(range(0xF3A9, 0xF3B1)) +
+             list(range(0xF3E1, 0xF400)))
+TEMP_DIDS = list(range(0xF2F0, 0xF300))
+
+CELL_SIGNALS = [
+    Signal("cell_%03d" % (n + 1), "เซลล์ #%d" % (n + 1), did, "V", 2,
+           CANDIDATE, lambda d, c: _u16(d) / 1000)
+    for n, did in enumerate(CELL_DIDS)]
+TEMP_SIGNALS = [
+    Signal("temp_%02d" % (n + 1), "อุณหภูมิแพ็ก T%d" % (n + 1), did, "C", 1,
+           CANDIDATE, lambda d, c: d[0] - 40)
+    for n, did in enumerate(TEMP_DIDS)]
+
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
              "charge_temp"]

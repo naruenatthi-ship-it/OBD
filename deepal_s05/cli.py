@@ -124,7 +124,9 @@ def detect_pack(args, elm):
 def cmd_check(args):
     vehicle = args.vehicle
     members = vehicle.group_members()
-    signals = vehicle.signals + args.custom
+    dropped = dropped_members(args)
+    signals = [s for s in vehicle.signals if s.key not in dropped] + \
+        args.custom
     with connect(args) as elm:
         bms = detect_pack(args, elm)
         snap = snapshot.take(elm, signals, args.arrays, args.capacity)
@@ -210,8 +212,17 @@ def status_line(values, custom):
     return text
 
 
+def dropped_members(args):
+    """Members of built-in groups that a --signals array replaced."""
+    keep = {id(a) for a in args.arrays}
+    return {k for g in args.vehicle.groups if id(g) not in keep
+            for k in g.members}
+
+
 def live_signals(args):
-    return args.vehicle.live_signals() + args.custom
+    dropped = dropped_members(args)
+    return [s for s in args.vehicle.live_signals()
+            if s.key not in dropped] + args.custom
 
 
 def status_extras(args):
@@ -238,13 +249,15 @@ def check_alerts(args, values, extra=()):
 
 def cmd_live(args):
     signals = live_signals(args)
+    slow = snapshot.GroupCache()  # per-cell values every 30 s
     with connect(args) as elm:
         log = snapshot.CsvLog(args.csv) if args.csv else None
         try:
             print("กด Ctrl+C เพื่อหยุด\n")
             count = 0
             while args.count == 0 or count < args.count:
-                snap = snapshot.take(elm, signals, args.arrays, args.capacity)
+                snap = snapshot.take(elm, signals, args.arrays, args.capacity,
+                                     slow=slow)
                 print(status_line(snap.values, status_extras(args)))
                 check_alerts(args, snap.values)
                 if log:
@@ -262,6 +275,7 @@ def cmd_live(args):
 
 def cmd_charge(args):
     signals = live_signals(args)
+    slow = snapshot.GroupCache()  # per-cell values every 30 s
     label = args.label or ""
     path = args.csv or "charge_%s%s.csv" % (
         datetime.datetime.now().strftime("%Y%m%d_%H%M"),
@@ -283,7 +297,8 @@ def cmd_charge(args):
         start = time.time()
         try:
             while True:
-                snap = snapshot.take(elm, signals, args.arrays, args.capacity)
+                snap = snapshot.take(elm, signals, args.arrays, args.capacity,
+                                     slow=slow)
                 log.write(snap)
                 history.append((snap.time, snap.values.get("soc"),
                                 delta_mv(snap.values)))
@@ -595,13 +610,6 @@ def cmd_dtc(args):
                                                      len(found)))
     if any(r["description"] == dtc.MANUFACTURER_SPECIFIC for r in found):
         print("โค้ดเฉพาะผู้ผลิตไม่มีคำอธิบายเปิดเผย ให้จดรหัสไปถามช่างหรือค้นต่อ")
-    if args.history:
-        active = [r for r in found if r["active"]]
-        scan = dtc.make_scan(answered, active, now_text(), headers)
-        history = dtc.load_history(args.history)
-        print()
-        print_dtc_diff(dtc.diff(history[-1] if history else None, scan))
-        dtc.save_scan(args.history, scan)
     if args.save:
         with open(args.save, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, ["header", "code", "status",
@@ -611,6 +619,17 @@ def cmd_dtc(args):
             w.writerows(dict(r, status="0x%02X" % r["status"])
                         for r in found)
         print("บันทึกไว้ที่ %s" % args.save)
+    if args.history:
+        active = [r for r in found if r["active"]]
+        scan = dtc.make_scan(answered, active, now_text(), headers)
+        history = dtc.load_history(args.history)
+        print()
+        print_dtc_diff(dtc.diff(history[-1] if history else None, scan))
+        try:
+            dtc.save_scan(args.history, scan)
+        except OSError as e:
+            print("เก็บประวัติไว้เทียบครั้งหน้าไม่ได้ (%s) ใส่ --history"
+                  " /var/lib/deepal-obd/dtc_history.json ถ้ารันบน Pi" % e)
     return 0
 
 
@@ -1125,7 +1144,7 @@ def parse_ranges(text):
     return out
 
 
-def discover_header(elm, header, ranges, extended):
+def discover_header(elm, header, ranges, extended, keep_ids=False):
     """Read every DID in `ranges` from one ECU: [(did, raw, cell_run)]."""
     found = []
     if extended:
@@ -1156,6 +1175,8 @@ def discover_header(elm, header, ranges, extended):
                 text = raw.hex(" ").upper()
                 if len(text) > 72:
                     text = text[:72] + " ..."
+                if did in PRIVATE_DIDS and not keep_ids:
+                    text = "(ซ่อน: เลข VIN/serial ใส่ --keep-ids ถ้าต้องการดู)"
                 print("%s 22%04X  %3d ไบต์  %s" % (header, did, len(raw),
                                                   text))
                 if run:
@@ -1179,7 +1200,8 @@ def cmd_discover(args):
         try:
             for header in headers:
                 for did, raw, run in discover_header(elm, header, ranges,
-                                                     args.extended):
+                                                     args.extended,
+                                                     args.keep_ids):
                     results.append((header, did, raw, run))
         except KeyboardInterrupt:
             print("\nหยุดแล้ว")
@@ -1683,7 +1705,11 @@ def main(argv=None):
         args.capacity = args.vehicle.capacity
     try:
         args.custom, args.arrays = config.load(args.signals)
-        args.arrays = list(args.vehicle.groups) + args.arrays
+        # an array in the --signals file replaces a built-in group of the
+        # same name
+        mine = {a.key for a in args.arrays}
+        args.arrays = [g for g in args.vehicle.groups
+                       if g.key not in mine] + args.arrays
         args.alert_rules = alerts.merge_rules(
             alerts.DEFAULT_RULES,
             args.vehicle.rule_overrides + config.load_alerts(args.signals))
@@ -1701,5 +1727,11 @@ def main(argv=None):
         print("ผิดพลาด: %s" % e, file=sys.stderr)
         return 2
     except OSError as e:
-        print("เปิดพอร์ต %s ไม่ได้: %s" % (args.port, e), file=sys.stderr)
+        if getattr(e, "filename", None):  # a file, not the adapter
+            print("อ่าน/เขียนไฟล์ %s ไม่ได้: %s (บน Pi ให้เก็บไฟล์ไว้ใน"
+                  " /var/lib/deepal-obd)" % (e.filename, e.strerror or e),
+                  file=sys.stderr)
+        else:
+            print("เปิดพอร์ต %s ไม่ได้: %s" % (args.port, e),
+                  file=sys.stderr)
         return 2

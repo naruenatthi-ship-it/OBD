@@ -35,6 +35,7 @@ class Poller(threading.Thread):
         super().__init__(daemon=True)
         self.baselines = baselines or {}
         self.vehicle = vehicle  # to read the BMS identification once
+        self.slow = snapshot.GroupCache()  # per-cell values every 30 s
         self.rules = alerts.DEFAULT_RULES if rules is None else rules
         self.notifier = notifier
         self.elm, self.signals, self.arrays = elm, signals, arrays
@@ -64,7 +65,7 @@ class Poller(threading.Thread):
         while not self.stop.is_set():
             try:
                 snap = snapshot.take(self.elm, self.signals, self.arrays,
-                                     self.capacity)
+                                     self.capacity, slow=self.slow)
                 if self.csv_log:
                     self.csv_log.write(snap)
                 values = dict(snap.values)

@@ -81,11 +81,18 @@ DEEPAL_PACKS = [
 
 
 def deepal_s05(**_):
+    groups = [
+        GroupArray("cells", "แรงดันรายเซลล์", "V",
+                   tuple(s.key for s in pids.CELL_SIGNALS), 2.0, 4.0),
+        GroupArray("temps", "อุณหภูมิในแพ็ก", "C",
+                   tuple(s.key for s in pids.TEMP_SIGNALS), -40, 120),
+    ]
     return Vehicle(
         key="deepal-s05", name="Deepal S05", protocol="6",
-        signals=list(pids.SIGNALS), live_keys=list(pids.LIVE_KEYS),
+        signals=list(pids.SIGNALS + pids.CELL_SIGNALS + pids.TEMP_SIGNALS),
+        live_keys=list(pids.LIVE_KEYS), groups=groups,
         capacity=pids.DEFAULT_CAPACITY_KWH, default_header=pids.BMS_HEADER,
-        source="jpires71/Deepal_S05_PIDs", bms_headers=(pids.BMS_HEADER,),
+        source="jpires71/Deepal_S05_PIDs + รถไทย", bms_headers=(pids.BMS_HEADER,),
         cell_nominal_v=3.2, known_packs=list(DEEPAL_PACKS))
 
 
