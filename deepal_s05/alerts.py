@@ -59,10 +59,8 @@ DEFAULT_RULES = [
     Rule("temp_delta_c", "อุณหภูมิในแพ็กต่างกัน", "°C", warn_above=8,
          critical_above=15,
          advice="ความร้อนในแพ็กไม่สม่ำเสมอ อาจเป็นระบบหล่อเย็น (ปั๊ม/น้ำยา)"),
-    Rule("charge_temp", "อุณหภูมิหัวชาร์จ", "°C", warn_above=65,
-         critical_above=80,
-         advice="หัวชาร์จร้อน เช็กหัวชาร์จ/ปลั๊กว่าหลวมหรือสกปรก"
-                " (สูตรค่านี้ยังรอยืนยัน)"),
+    # charge_temp (F255) has no default rule: on a real Thai S05 it did
+    # not behave like a temperature. Add one in --signals once confirmed.
     Rule("delta_mv", "ส่วนต่างแรงดันเซลล์", "mV", warn_above=100,
          critical_above=200,
          advice="เซลล์ไม่สมดุล ลองชาร์จ AC ให้เต็มแล้วเสียบทิ้งไว้ (คำสั่ง balance)"),

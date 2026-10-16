@@ -64,7 +64,8 @@ SIGNALS = [
            lambda d, c: _u16(d) / 10),
     Signal("pack_current", "กระแสแพ็ก", 0xF229, "A", 2, VALIDATED,
            lambda d, c: (_u16(d) - 6015) / 10,
-           "ทิศทาง +/- (ชาร์จ/จ่าย) ยังไม่ยืนยัน"),
+           "ลบ = ชาร์จเข้าแบต (ยืนยันกับ S05 56.1 ไทย: -8.0 A x 405 V"
+           " = 3.2 kW ตรงกับหน้าจอรถ)"),
     Signal("cell_v_max", "แรงดันเซลล์สูงสุด", 0xF250, "V", 2, VALIDATED,
            lambda d, c: _u16(d) / 1000),
     Signal("cell_v_min", "แรงดันเซลล์ต่ำสุด", 0xF251, "V", 2, VALIDATED,
@@ -73,8 +74,11 @@ SIGNALS = [
            lambda d, c: d[0] - 40),
     Signal("batt_temp_min", "อุณหภูมิแบตต่ำสุด", 0xF253, "C", 1, VALIDATED,
            lambda d, c: d[0] - 40),
-    Signal("charge_temp", "อุณหภูมิหัวชาร์จ", 0xF255, "C", 1, CANDIDATE,
-           lambda d, c: (d[0] - 32) / 1.8),
+    # On a Thai S05 56.1 this read 10 C (once 35 C) while AC charging in
+    # 30 C weather, so it is probably not the charge port temperature
+    Signal("charge_temp", "อุณหภูมิหัวชาร์จ", 0xF255, "C", 1, EXPERIMENTAL,
+           lambda d, c: (d[0] - 32) / 1.8,
+           "รถไทย 56.1 อ่านได้ 10 °C ตอนชาร์จ น่าจะไม่ใช่อุณหภูมิหัวชาร์จ"),
     Signal("soh", "SOH", 0xF27D, "%", 3, CANDIDATE,
            lambda d, c: _u24(d) / 10000),
     # Alternatives from the source README (disagree with the JSON profile)

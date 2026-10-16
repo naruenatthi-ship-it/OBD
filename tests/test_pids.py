@@ -13,7 +13,7 @@ def test_formulas():
     assert value("pack_current", "1773") == pytest.approx(-1.2)
     assert value("cell_v_max", "0D03") == pytest.approx(3.331)
     assert value("batt_temp_max", "47") == 31
-    assert value("charge_temp", "56") == pytest.approx(30.0)
+    assert value("charge_temp", "56") == pytest.approx(30.0)  # formula only
     assert value("soh", "0F0F78") == pytest.approx(98.7)
     assert value("soc_alt", "02D0") == pytest.approx(72.0)
 
