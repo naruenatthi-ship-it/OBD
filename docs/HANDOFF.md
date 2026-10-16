@@ -12,6 +12,9 @@
   · `obd rec ชื่อ นาที watch` บันทึกค่าที่ survey เห็นว่าเปลี่ยน (`examples/watch_live.csv`: 700 + 780 FD0C–FD1E)
   · ตัวอ่าน CSV ข้ามไบต์ศูนย์ (ไฟดับกลางคัน) · survey fsync ทุกแถว
   · `7A1 F260` = 8000 คงที่ → `iso_candidate_kohm` (EXPERIMENTAL ไม่แจ้งเตือน) ค่าฉนวน HV ตัวเต็ง
+- ✅ **VPS ตั้งแล้ว (2026-10-16 ~20:45)**: Ubuntu 22.04 ที่ ReadyIDC, ผู้ใช้ `deepal` (กุญแจของ Pi เท่านั้น ไม่มีรหัส),
+  เว็บพอร์ต 8080 ถามรหัสผ่านแล้ว (http ธรรมดา) · บอทของเจ้าของใช้ root + พอร์ต 8787 อย่าแตะ
+  · ค้าง: HTTPS ผ่าน Caddy + `<ip>.sslip.io`, ปิด root login ด้วยรหัสผ่าน (ให้เอเจนต์ฝั่ง VPS ทำ)
 - อีก session (`3g6l2n`) ทำงานคู่ขนาน push ไป happy-hawking ด้วย: ก่อน push ให้ `git fetch` แล้ว merge ก่อนเสมอ
   · `obd vps setup` แก้ให้ไม่ทำ cron ของบอทบน VPS หาย (`pi/vps-cron.sh` สำรอง + ไม่แตะถ้าอ่านไม่ได้) เทสต์ผ่าน 231
 - งานที่ค้างกลางทาง: ให้ `/files` เปิดได้ระหว่าง `obd bg`/`obd rec` โดยรัน `serve` (ไม่ต้องใช้กล่อง) ที่พอร์ต 8000
