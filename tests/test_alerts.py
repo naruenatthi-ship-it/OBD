@@ -313,3 +313,31 @@ def test_dc_charging_care_alerts():
     assert check(70, -120, 46)["dc_charge_temp"] == alerts.CRIT
     assert check(95, -16, 42) == {}      # home AC charging: fine
     assert check(95, 30, 42) == {}       # driving
+
+
+def test_dc_session_verdicts():
+    from deepal_s05.analysis import DcSession
+    s = DcSession(56.1, dc_price=8.0)
+    base = {"soc": 50, "batt_temp_max": 30, "dc_supply_kw": 30,
+            "dc_accept_kw": 60}
+    assert s.update(0, {"soc": 50}) is None
+    r = s.update(10, base)
+    assert r["state"] == "station"
+    r = s.update(70, dict(base, dc_supply_kw=58))
+    assert r["state"] in ("station", "battery")
+    s = DcSession(56.1, dc_price=8.0)
+    hot = dict(base, dc_supply_kw=34, dc_accept_kw=33.7, batt_temp_max=45)
+    for t in range(0, 3601, 60):
+        r = s.update(t, hot)
+    assert r["state"] == "battery_hot"
+    assert abs(r["kwh"] - 34) < 0.1 and abs(r["baht"] - 272) < 1
+    assert abs(r["eta_min"] - (30 / 100 * 56.1 / 34 * 60)) < 0.1
+    assert s.update(7200, {"soc": 80}) is None  # session over
+
+
+def test_dc_derived():
+    from deepal_s05 import pids
+    d = pids.derived({"pack_voltage": 400, "pack_current": -83})
+    assert abs(d["dc_supply_kw"] - 33.2) < 0.01
+    assert "dc_supply_kw" not in pids.derived(
+        {"pack_voltage": 400, "pack_current": -15})

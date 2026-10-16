@@ -92,6 +92,11 @@ SIGNALS = [
            lambda d, c: c - _u16(d) / 1000),
     Signal("efc", "รอบชาร์จเต็ม (EFC)", 0xF27F, "cycles", 4, EXPERIMENTAL,
            lambda d, c: _u32(d) / 1000000 / c),
+    # Max charge power the BMS accepts right now (x0.1 kW). 0x0151 = 33.7
+    # matched 83 A x 400 V at the P1B27 freeze frame; AC charge read 10.6.
+    Signal("dc_accept_kw", "แบตรับชาร์จได้", 0xF233, "kW", 2, CANDIDATE,
+           lambda d, c: _u16(d) / 10,
+           "กำลังชาร์จสูงสุดที่ BMS ยอมรับ ณ ตอนนี้ (รอยืนยันตอนชาร์จ DC)"),
     Signal("pack_power_raw", "กำลังแพ็ก (raw)", 0xF236, "", 0, CANDIDATE,
            None, "ยังไม่มีสูตร เก็บค่าดิบไว้เทียบ"),
 ]
@@ -171,7 +176,7 @@ INSULATION_CANDIDATES = [
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
              "charge_temp", "motor_temp", "inverter_temp", "motor_rpm",
-             "motor_torque", "odometer_km", "iso_candidate_kohm"]
+             "motor_torque", "odometer_km", "iso_candidate_kohm", "dc_accept_kw"]
 
 
 # Above this charging current (A into the pack) it is a DC fast charge:
@@ -202,6 +207,8 @@ def derived(values):
             out["dc_charge_soc"] = values["soc"]
         if values.get("batt_temp_max") is not None:
             out["dc_charge_temp"] = values["batt_temp_max"]
+    if i is not None and i < -DC_CHARGE_A and v is not None:
+        out["dc_supply_kw"] = -v * i / 1000  # what the pack takes in
     # insulation resistance per volt of pack voltage, the unit safety
     # standards use (ISO 6469-3: at least 100 ohm/V on the DC side)
     r = values.get("insulation_kohm")

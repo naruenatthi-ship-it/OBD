@@ -9,7 +9,7 @@ import traceback
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import alerts, identity, pids, snapshot
+from . import alerts, analysis, identity, pids, snapshot
 from .elm327 import ElmError
 
 LABELS = {
@@ -33,8 +33,9 @@ CELL_IR_FILE = "cell_ir.json"  # written by health --cell-ir
 class Poller(threading.Thread):
     def __init__(self, elm, signals, arrays, capacity, interval,
                  csv_log=None, rules=None, notifier=None, info=None,
-                 vehicle=None, baselines=None):
+                 vehicle=None, baselines=None, dc_price=7.5):
         super().__init__(daemon=True)
+        self.dc = analysis.DcSession(capacity, dc_price)
         self.baselines = baselines or {}
         self.vehicle = vehicle  # to read the BMS identification once
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
@@ -80,7 +81,10 @@ class Poller(threading.Thread):
                 with self.lock:
                     self.data.update(time=snap.time, values=snap.values,
                                      arrays=snap.arrays, errors=snap.errors,
-                                     error=None, alerts=[
+                                     error=None,
+                                     dc=self.dc.update(snap.time,
+                                                       snap.values),
+                                     alerts=[
                                          {"level": a.level, "text": a.text()}
                                          for a in found])
             except (ElmError, OSError) as e:
@@ -380,10 +384,10 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
 def serve(elm, signals, arrays, capacity, host="127.0.0.1", port=8000,
           interval=2.0, csv_path=None, rules=None, notifier=None,
           car_name="Deepal S05", info=None, vehicle=None,
-          ir_path=CELL_IR_FILE, baselines=None):
+          ir_path=CELL_IR_FILE, baselines=None, dc_price=7.5):
     csv_log = snapshot.CsvLog(csv_path) if csv_path else None
     poller = Poller(elm, signals, arrays, capacity, interval, csv_log,
-                    rules, notifier, info, vehicle, baselines)
+                    rules, notifier, info, vehicle, baselines, dc_price)
     server = make_server(poller, host, port, car_name=car_name,
                          ir_path=ir_path)
     poller.start()
@@ -470,11 +474,16 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 .alert { border-radius:10px; padding:10px 12px; border:1px solid var(--line);
   background:var(--surface); font-size:.92rem; border-left:5px solid var(--high); }
 .alert.crit { border-left-color:var(--bad); font-weight:600; }
+.dc { border:1px solid var(--line); border-left:6px solid var(--mid); border-radius:10px; padding:10px 14px; margin:10px 0; background:var(--surface); }
+.dc.station { border-left-color:var(--bad); } .dc.battery_hot { border-left-color:var(--bad); }
+.dc .big { display:flex; gap:20px; flex-wrap:wrap; font-size:1.5rem; font-weight:600; } .dc .big small { font-size:.8rem; font-weight:400; display:block; }
+.dc p { margin:6px 0 0; }
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
 <header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
 <nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/digest">สรุปผลสำรวจ</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></nav></header>
 <div class="alerts" id="alerts"></div>
+<section class="dc" id="dcCard" hidden></section>
 <div class="summary" id="summary"></div>
 <nav class="tabs" role="tablist" aria-label="รายละเอียด">
 <button role="tab" data-tab="cells" class="on">แรงดันเซลล์</button>
@@ -598,6 +607,18 @@ function render(d) {
     }).join('');
   }
   renderPack(v, info, cells);
+  renderDc(d.dc);
+}
+
+function renderDc(dc) {
+  var box = document.getElementById('dcCard');
+  box.hidden = !dc;
+  if (!dc) return;
+  box.className = 'dc ' + dc.state;
+  var eta = dc.reached ? 'ถึง '+dc.target+'% แล้ว' : (dc.eta_min===null ? 'ยังประเมินไม่ได้' : 'ถึง '+dc.target+'% อีก ~'+Math.round(dc.eta_min)+' นาที');
+  box.innerHTML = '<b>⚡ ชาร์จเร็ว DC</b><div class="big"><div>'+f(dc.accept_kw,1)+' kW<small>แบตรับได้ตอนนี้ (F233)</small></div><div>'+f(dc.supply_kw,1)+' kW<small>ตู้จ่ายจริง</small></div></div>'+
+    '<p>'+esc(dc.text)+'</p><p>'+eta+' · ชาร์จแล้ว '+f(dc.kwh,1)+' kWh ≈ <b>'+f(dc.baht,0)+'</b> บาท (ที่ '+f(dc.price,2)+' บาท/kWh)</p>'+
+    '<p class="note">เวลาประเมินจากกำลังเฉลี่ย 2 นาทีล่าสุด จริงจะนานกว่านี้เมื่อ SOC สูงเพราะกำลังลดลง · F233 ยังเป็นค่าที่รอยืนยัน</p>';
 }
 
 function renderPack(v, info, cells) {
