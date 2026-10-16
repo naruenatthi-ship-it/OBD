@@ -300,6 +300,6 @@ def test_discover_leaves_out_vin(url, tmp_path, capsys):
 def test_check_reads_motor_values(url, capsys):
     assert main(["--port", url, "check"]) == 0
     out = capsys.readouterr().out
-    assert "อุณหภูมิมอเตอร์" in out and " 49 C" in out
+    assert "อุณหภูมิมอเตอร์" in out and " 39 C" in out
     assert "รอบมอเตอร์" in out and "3000 rpm" in out
     assert "25 Nm" in out and "398 V" in out

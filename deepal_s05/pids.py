@@ -121,8 +121,11 @@ TEMP_SIGNALS = [
 # drive on a Thai S05 Max (2026-10-16). Torque x speed matched pack power
 # (e.g. regen -42.5 Nm at 9256 rpm vs -103 A x 405 V = -41.8 kW), and
 # FD1A tracked F228 within 0.2 V on average. FD0A rose steadily 49 -> 69 C
-# (motor), FD1E jumped with current (inverter); their A-40 offset is the
-# BMS convention and not yet confirmed.
+# (motor), FD1E jumped with current (inverter). The offset is A-50, not
+# the BMS's A-40: with A-40 the idle motor read ~10 C above the pack every
+# time the car stood (45 vs 33 C after hours parked on, 41 vs 31 C at 6:29
+# after 3.5 h off in 23 C air), and a motor cools faster than the pack.
+# Still a candidate until it is seen at air temperature after a full night.
 MOTOR_HEADER = "7A7"
 # Motor rpm per km/h shown on the speedometer: 6470 rpm at an 80 km/h
 # cruise (28 steady samples, 2026-10-16), about a 10.9:1 reduction on
@@ -130,10 +133,11 @@ MOTOR_HEADER = "7A7"
 RPM_PER_KMH = 80.9
 MOTOR_SIGNALS = [
     Signal("motor_temp", "อุณหภูมิมอเตอร์", 0xFD0A, "C", 1, CANDIDATE,
-           lambda d, c: d[0] - 40, "สูตร A-40 ยังรอยืนยัน",
+           lambda d, c: d[0] - 50, "สูตร A-50 (A-40 ร้อนกว่าแบตตอนจอดเสมอ) ยังรอยืนยัน",
            header=MOTOR_HEADER),
     Signal("inverter_temp", "อุณหภูมิอินเวอร์เตอร์", 0xFD1E, "C", 1,
-           CANDIDATE, lambda d, c: d[0] - 40, "สูตร A-40 ยังรอยืนยัน",
+           CANDIDATE, lambda d, c: d[0] - 50,
+           "สูตร A-50 (A-40 ร้อนกว่าแบตตอนจอดเสมอ) ยังรอยืนยัน",
            header=MOTOR_HEADER),
     Signal("motor_rpm", "รอบมอเตอร์", 0xFD07, "rpm", 2, CANDIDATE,
            lambda d, c: _u16(d) - 20000, header=MOTOR_HEADER),
