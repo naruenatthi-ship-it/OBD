@@ -178,3 +178,37 @@ def test_survey_shortens_the_adapter_timer_and_restores_it(tmp_path):
     with pytest.raises(ElmError):
         s.run(broken, 100)
     assert sent[-1] == survey.NORMAL_ST       # restored even on errors
+
+
+def test_digest_keeps_what_is_worth_a_look(tmp_path):
+    p = tmp_path / survey.RESULTS_FILE
+    p.write_text(
+        "time,header,did,length,raw\n"
+        "2026-10-16T20:00:00,754,F187,6,333630330000\n"
+        "2026-10-16T20:00:01,754,F190,17,(ซ่อน)\n"
+        "2026-10-16T20:00:02,754,F1B0,4,00000000\n"
+        "2026-10-16T20:00:03,754,F1F0,1,8D\n"
+        "2026-10-16T20:00:04,754,FEF7,20," + "AB" * 20 + "\n"
+        "2026-10-16T20:02:00,754,F1F0,1,8E\n"
+        "2026-10-16T20:02:01,754,F1F0,1,8E\n", encoding="utf-8")
+    lines, newest = survey.digest(str(p))
+    assert newest == "2026-10-16T20:02:01"
+    assert lines[0] == "== 754: 5 DID (00/FF ล้วน 1) =="
+    assert "F187='3603'" in lines[1] and "F190=(ซ่อน)" in lines[1]
+    assert "  F1F0 8D → 8E" in lines
+    assert "  FEF7 " + "AB" * 16 + "…(20B)" in lines
+    # only what came after the last digest
+    lines, _ = survey.digest(str(p), since="2026-10-16T20:00:04")
+    assert lines == ["== 754: 1 DID (00/FF ล้วน 0) ==", "  F1F0 8E"]
+
+
+def test_digest_command_sends_only_new_rows(tmp_path, capsys):
+    from deepal_s05 import cli
+    p = tmp_path / survey.RESULTS_FILE
+    p.write_text("time,header,did,length,raw\n"
+                 "2026-10-16T20:00:00,7A1,F228,2,0FCA\n", encoding="utf-8")
+    assert cli.main(["survey", "digest", "--dir", str(tmp_path)]) == 0
+    assert "F228 0FCA" in (tmp_path / survey.DIGEST_FILE).read_text("utf-8")
+    capsys.readouterr()
+    assert cli.main(["survey", "digest", "--dir", str(tmp_path)]) == 0
+    assert "ไม่มีผลใหม่" in capsys.readouterr().out

@@ -1,138 +1,52 @@
 # ส่งต่องาน (handoff) — อัปเดต 2026-10-16
 
-อ่าน [CLAUDE.md](../CLAUDE.md) (กติกา) ก่อนไฟล์นี้ · ผลจากรถจริงละเอียดอยู่ใน [TODO.md](TODO.md)
+กติกาอยู่ใน [CLAUDE.md](../CLAUDE.md) · แผนงาน [TODO.md](TODO.md) · ผลจากรถจริง [RESULTS.md](RESULTS.md) (ยาว ใช้ grep)
+**ไฟล์นี้ต้องสั้น (ไม่เกิน ~60 บรรทัด)**: เก็บแค่สถานะตอนนี้ ประวัติย้ายไป RESULTS.md
 
 ## สถานะตอนนี้
 
-- โค้ดล่าสุดอยู่บน `claude/happy-hawking-6te6q7` และ `claude/handoff-docs-continuation-7qoifs` (เหมือนกัน, ไม่มี PR)
-  · Pi ดึงจาก happy-hawking · เทสต์ผ่าน 232 ตัว
-- เจ้าของส่ง survey_results.csv (ถึง 20:53) มาแล้ว: สรุปใน TODO.md · F000–FFFF ครบ 700–763 · 753/754 F1F0 น่าจะ 12V
-  · แก้ survey บันทึกตำแหน่งทุกครั้งที่เจอค่า (เดิมดับแล้วอ่านซ้ำ) → ต้อง `obd update`
-- งานหลัง 11:30 (2026-10-16) ที่ยังไม่ได้เขียนในไฟล์นี้มาก่อน (รายละเอียดใน TODO.md "ผลจากรถจริง"):
-  · เลขไมล์ `700 F1AE` ✅ ยืนยันกับหน้าปัดแล้ว · `700 F2F0` น่าจะแรงดัน 12V ×0.1 (CANDIDATE)
-  · `obd survey` ทำงานบนรถจริงแล้ว ตั้ง ATST19 (100 ms) ระหว่างสำรวจ → เร็วขึ้น ~2 เท่า · บรรทัดสถานะบอกความคืบหน้า
-  · `obd rec ชื่อ นาที watch` บันทึกค่าที่ survey เห็นว่าเปลี่ยน (`examples/watch_live.csv`: 700 + 780 FD0C–FD1E)
-  · ตัวอ่าน CSV ข้ามไบต์ศูนย์ (ไฟดับกลางคัน) · survey fsync ทุกแถว
-  · `7A1 F260` = 8000 คงที่ → `iso_candidate_kohm` (EXPERIMENTAL ไม่แจ้งเตือน) ค่าฉนวน HV ตัวเต็ง
-- ✅ **VPS ตั้งแล้ว (2026-10-16 ~20:45)**: Ubuntu 22.04 ที่ ReadyIDC, ผู้ใช้ `deepal` (กุญแจของ Pi เท่านั้น ไม่มีรหัส),
-  เว็บพอร์ต 8080 ถามรหัสผ่านแล้ว (http ธรรมดา) · บอทของเจ้าของใช้ root + พอร์ต 8787 อย่าแตะ
-  · ค้าง: HTTPS ผ่าน Caddy + `<ip>.sslip.io`, ปิด root login ด้วยรหัสผ่าน (ให้เอเจนต์ฝั่ง VPS ทำ)
-- อีก session (`3g6l2n`) ทำงานคู่ขนาน push ไป happy-hawking ด้วย: ก่อน push ให้ `git fetch` แล้ว merge ก่อนเสมอ
-  · `obd vps setup` แก้ให้ไม่ทำ cron ของบอทบน VPS หาย (`pi/vps-cron.sh` สำรอง + ไม่แตะถ้าอ่านไม่ได้)
-- งานที่ค้างกลางทาง: ให้ `/files` เปิดได้ระหว่าง `obd bg`/`obd rec` โดยรัน `serve` (ไม่ต้องใช้กล่อง) ที่พอร์ต 8000
-  แทน dashboard ชั่วคราว · ติดที่ `serve` บังคับรหัสผ่านเมื่อเปิดให้เครื่องอื่นเข้า (ตั้งใจไว้สำหรับ VPS)
-  → รอเจ้าของเลือก: ตั้งรหัสผ่านหน้าเว็บบน Pi (`OBD_WEB_PASSWORD` ใน /etc/default/deepal-obd) หรือแบบอื่น
-- session 2026-10-16 (ต่อ): เพิ่มแจ้งเตือน Telegram (`obd telegram TOKEN`, `--telegram CHAT_ID`,
-  คำสั่ง `notify-test`) ยังไม่มีผล scan จากเจ้าของ
-- ฮาร์ดแวร์ใช้งานจริงแล้ว: Pi Zero 2 W ในรถ + vLinker MC+ (BLE) → อ่าน BMS/เซลล์/มอเตอร์ของ Deepal ได้
-- เจ้าของเพิ่งต่อ Pi เข้า WiFi ที่ทำงานได้ และได้รับคำแนะนำให้:
-  1. `obd update`
-  2. `obd bg scan 7A4,742 0100-EFFF` (หา OBC) แล้วดูด้วย `obd log`
-  3. ผลอยู่ที่ `http://<IP>:8000/files` (IP จาก `obd web`)
-  → **ยังไม่รู้ผล** ถ้าเจ้าของส่งไฟล์ scan มา ให้หา DID ที่ตอบใน 7A4/742 แล้วบันทึกลง TODO.md
+- โค้ดอยู่บน `claude/happy-hawking-6te6q7` (Pi ดึงจากที่นี่) · เทสต์ผ่าน 234 ตัว · ไม่มี PR
+- อาจมี session อื่น push ไป happy-hawking พร้อมกัน → ก่อน push: `git fetch` แล้ว merge ก่อนเสมอ
+- ฮาร์ดแวร์ใช้จริงแล้ว: Pi Zero 2 W ในรถ + vLinker MC+ (BLE) อ่าน BMS/เซลล์/มอเตอร์/เลขไมล์ได้
+- `obd survey` ทำงานบนรถ: ช่วง F000–FFFF ครบ 700–763 แล้ว (ถึง 20:53) เหลือ 776, 780, 785, 791, 7A1, 7A4, 7A7, 7F1
+  · ผลล่าสุดสรุปใน RESULTS.md (753/754 F1F0 น่าจะแรงดัน 12V) · แก้ให้บันทึกตำแหน่งทุกครั้งที่เจอค่า (ต้อง `obd update`)
+- ✅ VPS ตั้งแล้ว: Ubuntu 22.04, ผู้ใช้ `deepal` (กุญแจของ Pi เท่านั้น), เว็บพอร์ต 8080 มีรหัสผ่าน (http)
+  · บอทของเจ้าของใช้ root + พอร์ต 8787 อย่าแตะ · ค้าง: HTTPS (Caddy + sslip.io), ปิด root login ด้วยรหัสผ่าน
+- ใหม่: `obd survey digest` สรุปผล survey/scan เป็นข้อความสั้น (เล็กกว่าไฟล์ดิบ ~6 เท่า เฉพาะของใหม่) → `survey_digest.txt` (เปิดดูใน `/files` ได้)
+  ใช้ `--file scan_xxx.csv` กับไฟล์ scan, `--all` ดูทั้งหมด · ยังไม่ได้ลองบน Pi (ต้อง `obd update`)
 
-## สิ่งที่เขียนแล้วแต่ยังไม่เคยลองบน Pi จริง
+## รอเจ้าของตัดสินใจ / ส่งข้อมูล
 
-ถ้าเจ้าของเจอปัญหา ให้สงสัยของในรายการนี้ก่อน
+- `/files` ระหว่าง `obd bg`/`obd rec`: รัน `serve` ที่พอร์ต 8000 แทน dashboard ชั่วคราว แต่ `serve` บังคับรหัสผ่าน
+  → เจ้าของเลือก: ใช้รหัสผ่าน (แนะนำ) / ไม่ใช้ / ไม่ทำ (ระบบความปลอดภัยไม่ยอมให้ Claude ปิดรหัสผ่านเอง)
+- `obd rec ขับ 20 watch` ตอนขับ (หาความเร็วล้อ 780 FD0C–FD10) · ชาร์จ SOC ต่ำ→เต็มแล้ว `obd soh` · บิลค่าไฟ (tariff.json)
+- ยืนยันอุณหภูมิมอเตอร์ (A-40): จอดค้างคืน `obd check` ตอนเช้า · ยืนยัน 80.9 rpm ต่อ km/h ด้วย `obd trip`
+- ชาร์จ AC ครั้งหน้า ถ่ายจอรถ (V, A) → ยืนยัน 7A4 FD23 / ประสิทธิภาพ OBC · ตั้ง Telegram (`obd telegram TOKEN`)
 
-- `deepal-hotspot.timer` (`pi/hotspot-first.sh`): ทุก 60 วิ ถ้าเห็น Hotspot และยังไม่ได้ต่อ → `nmcli connection up hotspot`
-- `obd wifi add/remove`, `obd off`, `obd reboot`, `obd bg`, `obd log`, คำใบ้ตอนพิมพ์ `obd 17` นอกเมนู
-- `discover` เขียน CSV ทีละแถว (ดับกลางคันผลไม่หาย)
-- `obd freeze` (UDS `19 04`, อนุญาตแล้ว): ความยาวแต่ละ DID ในภาพนิ่งได้จากการอ่าน `22` สดๆ ถ้า ECU
-  ไม่ให้อ่าน DID นั้น ส่วนที่เหลือจะเป็น "แยกไม่ได้" (ต้องเดาความยาวเองจากค่าดิบ)
-- หน้า `/topology`, `/dyno`, `/charge`, `/freeze` + `obd topo/dyno/chargecurve` (ลองกับข้อมูลจำลองเท่านั้น)
-  · `/files/*.html` เปิดในเบราว์เซอร์แทนดาวน์โหลดแล้ว
-- `obd predict` / `/health` (เตือนล่วงหน้า, `deepal_s05/predict.py`): autopilot รันหลังรถดับทุกครั้งและแจ้งเตือน
-  เมื่อมีชิ้นส่วนเปลี่ยนเป็น 🟡/🔴 · ลองกับข้อมูลจำลองเท่านั้น · ข้อสงสัย:
-  - แบต 12V ใช้เกณฑ์ 12.2 V ตามแบตตะกั่ว ถ้าแบต 12V ของ Deepal เป็นลิเธียมต้องปรับเกณฑ์
-  - ข้อมูล 12V ตอนกลางคืนจะมีก็ต่อเมื่อ Pi ยังมีไฟตอนรถหลับ (ตอนนี้รถตัดไฟแล้ว Pi ดับ → ข้อนี้น่าจะ ⚪ ตลอด)
-- หน้า `/files` เรียงตามเวลาในชื่อไฟล์ (ไม่ใช่เวลาแก้ล่าสุด) แบ่งตามวัน บอกขนาดรวมและที่ว่างในการ์ด
-  · `obd clean` (`deepal_s05/datafiles.py`) ลบ log เก่า 7 วัน, .html, ผลครั้งเดียวเก่า 90 วัน (เก็บล่าสุด 3) ถามก่อนลบ
-  ไม่แตะ drive_/charge_/rec_*.csv/scan_/aux12v_ และไฟล์ประวัติ
-- ชุดใหม่ (ยังไม่ได้ลองกับรถ/VPS จริง): `obd soh` (ความจุจากการชาร์จ), `obd cost` + `/cost` (tariff.json),
-  `obd canscan ชื่อ` + `obd cancompare` (ATMA ทีละ 32 id), โมดูลแบตใน `/health` (`predict.module_groups`),
-  `obd vps setup ผู้ใช้@VPS` → rsync ทุก 15 นาที (deepal-vps-sync.timer) + `serve` บน VPS (basic auth, crontab @reboot)
-  · VPS ของเจ้าของใช้เป็นบอท download/upload อยู่แล้ว ต้องเช็ก python3/rsync/พอร์ต 8080 ว่าว่าง
-  · predict อ่านไฟล์ขับ 90 วันล่าสุด เก็บเซลล์ทุก 10 แถว (~80 MB ต่อข้อมูล 1 เดือน ขับวันละชั่วโมง)
-- `obd survey` (`deepal_s05/survey.py`): autopilot ใช้เวลาว่างระหว่างรอบ (จอดนิ่งเท่านั้น rpm < 50) ถาม DID ต่อจาก
-  `survey.json` ผลลง `survey_results.csv` · timeout 5 ครั้งติด = กล่อง OBD หลุด (คืน DID แล้วต่อใหม่) · `obd stop` ตั้ง
-  `pause_until_wake` = เวลา → ปลดเมื่อเห็นรถหลับ หรือ Pi บูตหลังเวลานั้น · ยังไม่ได้ลองกับรถ
-  · ทั้งหมด 18 กล่อง × 65,536 = 1.18 ล้าน DID ที่ ~300/นาที ≈ 65 ชม.ที่รถเปิดจอด (ชาร์จค้างคืนช่วยมาก)
-- แจ้งเตือนชาร์จ DC: `pids.derived` ใส่ `dc_charge_soc`/`dc_charge_temp` เมื่อกระแส < −40 A กฎใน `DEEPAL_RULES`
-  · เจ้าของรับทราบวิธีดูแลแบต (ร้อน, DC ถึง 80–85%, AC เต็มสัปดาห์ละครั้ง) และตัดสินใจไม่สั่งบาลานซ์เอง (คงอ่านอย่างเดียว)
-- `obd telegram TOKEN` / `obd telegram`: บันทึก `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` ลง
-  `/etc/default/deepal-obd` (chmod 640) หาเลขแชตจาก getUpdates ส่งข้อความทดสอบ แล้ว restart บริการ
-  · ยังไม่เคยลองกับบอทจริง (ในเทสต์ใช้ API ปลอม) · ต้อง `obd update` ก่อน
+## เขียนแล้วแต่ยังไม่เคยลองบน Pi จริง (มีปัญหาให้สงสัยก่อน)
 
-## เหตุการณ์ที่ควรรู้
-
-- ระหว่าง `obd bg`/`obd rec` บริการ deepal-obd ถูกหยุด หน้า dashboard และ `/files` จึงเปิดไม่ได้
-  → เพิ่ม `obd show [คำค้น]` พิมพ์ไฟล์ผลในจอแทน (ต้อง `obd update` หลังงานเบื้องหลังเสร็จ)
-  · ไอเดียต่อ: ให้ `/files` เปิดได้ตลอด (เว็บไฟล์แยกจากตัวที่ใช้กล่อง)
-- 13:51 เริ่ม `obd bg scan 7A4,742 0100-EFFF` รอบใหม่ · ถึง 7A4:2040 ยังไม่มี DID ตอบ (CSV มีแต่หัวตาราง
-  = เขียนทีละแถวทำงานบน Pi แล้ว) · รอบ 13:03 ไม่มีไฟล์ CSV เพราะรันก่อนมีการเขียนทีละแถว
-  ใน log ทั้งสองรอบไม่มีบรรทัด `7A4 22xxxx` → 7A4 0100–2FFF ไม่ตอบในโหมดปกติ (ไม่ได้ชาร์จ)
-- 14:15 สแกนโหมดขยายระหว่างชาร์จ: 7A4/742 ตอบแค่รหัสกล่อง (F1xx) ดูรายละเอียดใน TODO.md
-- 14:21 สแกน D000–EFFF, 0400–1FFF โหมดขยายระหว่างชาร์จ: 7A4/742 ไม่ตอบเลย → แผนต่อ: `obd topo` ดูรหัสชิ้นส่วนทุกกล่อง
-  หากล่อง 21xx อื่น และดักฟัง CAN ตอนชาร์จ (sniff) ก่อนจะไล่สแกนช่วงที่เหลือ
-
-- **13:03** สแกน `7A4,742 0100-EFFF` (ไม่ได้ชาร์จ) ไปถึง `7A4:3000` แล้ว Pi ดับ เพราะรถตัดไฟเอง
-  ผลช่วง 7A4 0100–2FFF อยู่ใน `bg_20261016-1303.log` บน Pi แต่ยังไม่ได้ดู
-- **WiFi ที่ทำงานครั้งแรก**: ต่อแล้วมือถือหา Pi ไม่เจอ ทั้ง WiFi นั้นและ Hotspot
-  สาเหตุน่าจะเป็นวงที่กันอุปกรณ์มองเห็นกัน ร่วมกับรถตัดไฟ
-  กู้ได้ที่บ้าน (WiFi บ้าน IP 192.168.1.37) ตอนนี้จำไว้ 3 วง:
-  - บ้าน (priority 0)
-  - `hotspot` (10)
-  - `work` (0)
-- NetworkManager ไม่สลับจากวงที่ต่ออยู่ไปวงที่ priority สูงกว่าเอง จึงต้องเพิ่ม timer ข้างบน
-- BMS มี DTC `P1B27-05` (บิตสั่งไฟเตือนติด) แต่หน้าปัดไม่มีไฟเตือน
-  เจ้าของเจอคำอธิบายในเน็ตว่า "กระแสชาร์จเกิน" ยังไม่ยืนยัน · อีกตัวคือ `P1B53-05` · 7A4 มี `P1A89-00`
-
-## งานค้าง (เรียงตามความสำคัญ)
-
-0. เลขไมล์: F300–F31F, DD00–DDFF ทุกกล่องไม่มี · ช่อง OBD ไม่มีข้อมูลกระจาย (0 เฟรม) → พักไว้ ใช้ระยะจากรอบมอเตอร์ + จดเลขไมล์เทียบ
-   · รอเจ้าของ: ข้อมูล VPS (OS, python3, rsync, พอร์ต 8080), ชาร์จ SOC ต่ำ→เต็ม แล้ว `obd soh`, บิลค่าไฟ (tariff.json)
-1. **ของที่เจ้าของทำได้เลย ไม่ต้องเขียนโค้ด**:
-   - ยืนยันอุณหภูมิมอเตอร์ (A-40): จอดค้างคืน `obd check` ตอนเช้า เทียบกับอากาศ
-   - ยืนยัน 80.9 rpm ต่อ km/h: จดเลขไมล์หน้าปัดก่อน/หลังขับ เทียบ `obd trip`
-   - ชาร์จ AC ครั้งหน้า: ถ่ายจอรถ (V, A ไฟบ้าน) → ยืนยัน 7A4 FD23 และประสิทธิภาพ OBC (C)
-   - ตั้ง Telegram (`obd telegram TOKEN`) · ลอง `/dyno`, `/charge`, `/health`
-2. ✅ B/C(ค่าไฟ)/D/E/G เขียนแล้ว รอลองจริง: ชาร์จ SOC ต่ำ→เต็มแล้ว `obd soh` · `obd canscan charging` vs `parked`
-   · `obd vps setup` · เดิม: **B: SOH จากการชาร์จ** (เขียนโค้ดได้เลย ข้อมูลมีใน drive_*.csv ที่ autopilot บันทึกตอนชาร์จ):
-   รวม Ah จาก F229 ช่วง SOC ต่ำ→สูง ÷ ΔSOC → ความจุจริง เทียบ F238 = 148 Ah? → ใส่ใน `/health`
-3. **E: ดักฟัง CAN ตอนชาร์จ AC** หาค่าสดของ OBC ที่ 7A4 ไม่ให้อ่าน (BLE อาจรับไม่ทัน ต้องกรอง id)
-4. **D: ลายนิ้วมือเซลล์ / โมดูล** (ต่อยอด check_weak_cell ใน predict.py: จัดกลุ่มเซลล์ที่ขึ้นลงพร้อมกัน)
-5. **ค่าไฟการชาร์จ** (TODO งานเสริม 4) และ **G: VPS / สำรองข้อมูล**
-6. **I: CR-V** เมื่อเจ้าของพร้อม · ไฟล์ `.bat` Windows · เปลี่ยนชื่อ repo (เจ้าของตัดสินใจ)
-- ✅ ทำแล้ว: Telegram, freeze (19 04), topology/dyno/charge, predict (H), obd show/clean
+- `deepal-hotspot.timer`, `obd wifi add/remove`, `obd off/reboot/bg/log`, `obd freeze` (19 04), `obd show/clean`
+- หน้า `/topology`, `/dyno`, `/charge`, `/freeze`, `/health` (predict), `/cost` · `obd soh`, `obd canscan/cancompare`
+- `obd telegram` (ทดสอบกับ API ปลอมเท่านั้น) · แจ้งเตือนชาร์จ DC (SOC ≥ 85%, แบต > 40 °C)
+- predict: เกณฑ์ 12V 12.2 V ตามแบตตะกั่ว (ถ้า Deepal ใช้ 12V ลิเธียมต้องปรับ) · 12V กลางคืนน่าจะ ⚪ ตลอด (Pi ดับตอนรถหลับ)
+- WiFi: จำไว้ 3 วง บ้าน (IP 192.168.1.37), `hotspot` (priority 10), `work` (วงที่ทำงานกันอุปกรณ์มองเห็นกัน)
 
 ## แผนที่โค้ดย่อ
 
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `deepal_s05/elm327.py` | คุยกับกล่อง ELM327 + `ALLOWED_REQUESTS` (อ่านอย่างเดียว) + `open_port` (serial/tcp/ble) |
-| `deepal_s05/ble.py` | BLE ผ่าน bleak, หลุดค้างแล้วตัดทิ้งลองใหม่ |
-| `deepal_s05/pids.py` | สูตรค่า Deepal (BMS, เซลล์, มอเตอร์ 7A7) + `derived()` |
-| `deepal_s05/vehicles.py` | โปรไฟล์รถ (deepal / crv-hybrid), เกณฑ์เตือน, รหัสแพ็กที่รู้จัก |
-| `deepal_s05/identity.py` | อ่านรหัส ECU (F187…) และเดารุ่นแพ็กจากรหัส BMS |
-| `deepal_s05/cli.py` | คำสั่งทั้งหมด (check, health, dtc, ecus, discover, record, trip, dashboard, autopilot…) |
-| `deepal_s05/dashboard.py` | หน้าเว็บ :8000 (แท็บเซลล์/อุณหภูมิ/IR/ข้อมูลแพ็ก, `/files`) |
-| `deepal_s05/alerts.py` | เกณฑ์เตือน + ส่งแจ้งเตือน (ntfy, Telegram, `multi_sender`, `Notifier` กันส่งซ้ำ) |
-| `deepal_s05/soh.py`, `cost.py`, `canscan.py`, `remote.py` | SOH จากการชาร์จ, ค่าไฟ, ดักฟัง CAN, หน้าเว็บบน VPS |
-| `pi/vps-serve.sh`, `pi/deepal-vps-sync.*` | ฝั่ง VPS เริ่มเว็บ / timer ส่งข้อมูลจาก Pi |
-| `deepal_s05/predict.py` | เตือนล่วงหน้า: แนวโน้ม + เทียบปกติของรถคันนี้ แยก session จาก drive_*.csv |
-| `deepal_s05/visual.py` | หน้าแผนผัง ECU, ไดโน + แผนที่ประสิทธิภาพ, กราฟชาร์จเทียบ SOC, ภาพนิ่งโค้ด (สร้างจากไฟล์) |
-| `deepal_s05/autopilot.py` | service อัตโนมัติบน Pi (อ่านเมื่อรถ READY, checkup, แจ้งเตือน ntfy) |
-| `deepal_s05/analysis.py` | correlate, trip_summaries |
-| `pi/obd` | คำสั่งลัดบน Pi (ติดตั้งเป็น `/usr/local/bin/obd`) |
-| `pi/install.sh`, `pi/pair.sh` | ติดตั้ง / จับคู่กล่อง (ปลด rfkill, ติด bleak, sudoers, timer) |
-| `emulator/deepal_s05_scenario.py` | รถจำลองสำหรับเทสต์ (layout เซลล์/มอเตอร์ตามรถจริง) |
+| `deepal_s05/elm327.py` | ELM327 + `ALLOWED_REQUESTS` (อ่านอย่างเดียว) + `open_port` (serial/tcp/ble) · `ble.py` = bleak |
+| `deepal_s05/pids.py`, `vehicles.py` | สูตรค่า Deepal + `derived()` · โปรไฟล์รถ เกณฑ์เตือน รหัสแพ็ก |
+| `deepal_s05/cli.py` (2,300 บรรทัด ใช้ grep) | คำสั่งทั้งหมด · `PRIVATE_DIDS` |
+| `deepal_s05/autopilot.py`, `survey.py` | service บน Pi · สำรวจ DID ทีละนิด + `digest` |
+| `deepal_s05/dashboard.py`, `visual.py`, `remote.py` | หน้าเว็บ :8000 + `/files` · หน้าภาพจากไฟล์ · เว็บบน VPS |
+| `deepal_s05/alerts.py`, `predict.py` | แจ้งเตือน (ntfy/Telegram) · เตือนล่วงหน้าจากแนวโน้ม |
+| `deepal_s05/soh.py`, `cost.py`, `canscan.py`, `analysis.py` | SOH, ค่าไฟ, ดักฟัง CAN, ทริป |
+| `pi/obd`, `pi/install.sh`, `pi/pair.sh`, `pi/vps-*` | คำสั่งลัดบน Pi, ติดตั้ง, จับคู่กล่อง, ฝั่ง VPS |
+| `emulator/deepal_s05_scenario.py` | รถจำลองสำหรับเทสต์ |
 
 ## วิธีเริ่มงานต่อ
 
-- ถามเจ้าของว่า survey ไปถึงไหน (บรรทัดสถานะบนหน้า dashboard หรือ `obd survey`) และให้ลอง `obd rec ขับ 20 watch` ตอนขับ (หาความเร็วล้อ 780)
-- ถามเจ้าของว่าผล scan ที่ทำงานเป็นยังไง (หรือให้ส่งไฟล์ `scan_*.csv` / ผล `obd log`)
-- ถามว่าอยากลอง Telegram ไหม (ขั้นตอนอยู่ใน docs/USAGE.md หัวข้อแจ้งเตือน)
-- ทุกคำสั่งบน Pi ให้เป็น `obd ...` บรรทัดเดียว
-- ถ้าแก้ `pi/obd` ต้องบอกให้ `obd update` ก่อนใช้
-- อัปเดตไฟล์นี้ทุกครั้งก่อนจบ session
+- อ่านแค่ CLAUDE.md + ไฟล์นี้ก่อน อย่าเปิด RESULTS.md/USAGE.md ทั้งไฟล์ ใช้ grep หาเฉพาะที่ต้องใช้
+- ขอให้เจ้าของส่งผลเป็น `obd survey digest` (หรือ `obd log`) แทนไฟล์ CSV ดิบ
+- ถ้าแก้ `pi/obd` ต้องบอกให้ `obd update` ก่อนใช้ · อัปเดตไฟล์นี้ก่อนจบ session (ให้สั้นเหมือนเดิม)

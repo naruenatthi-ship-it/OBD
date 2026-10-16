@@ -12,6 +12,8 @@ import os
 import re
 
 SHOWN = (".csv", ".json", ".log", ".html")
+# text files the program writes for people (other .txt files stay hidden)
+SHOWN_NAMES = {"survey_digest.txt"}
 STAMP = re.compile(r"(20\d{2})(\d{2})(\d{2})?(?:[-_](\d{2})(\d{2}))?")
 
 # history the warnings and trends are built from: never cleaned up
@@ -52,7 +54,8 @@ def entries(data_dir):
     out = []
     for name in os.listdir(data_dir):
         path = os.path.join(data_dir, name)
-        if not (os.path.isfile(path) and name.endswith(SHOWN)):
+        if not (os.path.isfile(path) and (name.endswith(SHOWN) or
+                                          name in SHOWN_NAMES)):
             continue
         st = os.stat(path)
         out.append({"name": name, "size": st.st_size, "kind": kind(name),

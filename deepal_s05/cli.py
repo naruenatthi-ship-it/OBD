@@ -1666,7 +1666,43 @@ def cmd_survey(args):
         s.set(paused=False, pause_until_wake=False)
     elif args.action == "until-wake":
         s.set(pause_until_wake=time.time())
+    elif args.action == "digest":
+        return survey_digest(args)
     print(s.status())
+    return 0
+
+
+def survey_digest(args):
+    """A short text of the survey (or a scan file) to send in a chat
+    instead of the raw file; only what is new since the last digest."""
+    from . import survey
+    path = args.file or os.path.join(args.dir, survey.RESULTS_FILE)
+    if not os.path.exists(path):
+        print("ไม่เจอไฟล์ %s" % path)
+        return 1
+    mark = os.path.join(args.dir, survey.DIGEST_MARK)
+    since = ""
+    if not args.all and not args.file:
+        try:
+            with open(mark, encoding="utf-8") as f:
+                since = f.read().strip()
+        except OSError:
+            pass
+    lines, newest = survey.digest(path, since)
+    if not lines:
+        print("ไม่มีผลใหม่ตั้งแต่สรุปครั้งก่อน (%s) ดูทั้งหมด: --all" % since)
+        return 0
+    head = "สรุป %s%s" % (os.path.basename(path),
+                         " ตั้งแต่ " + since if since else "")
+    text = "\n".join([head] + lines) + "\n"
+    out = os.path.join(args.dir, survey.DIGEST_FILE)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(text)
+    print("บันทึกไว้ที่ %s (ส่งไฟล์นี้แทนไฟล์ดิบ)" % out)
+    if newest and not args.file:
+        with open(mark, "w", encoding="utf-8") as f:
+            f.write(newest)
     return 0
 
 
@@ -2236,11 +2272,14 @@ def build_parser():
                         help="สำรวจ DID ทุกกล่องแบบค่อยเป็นค่อยไป ทำต่อเองทุกครั้งที่รถเปิด")
     su.add_argument("action", nargs="?", default="status",
                     choices=["status", "start", "pause", "resume",
-                             "until-wake"])
+                             "until-wake", "digest"])
     su.add_argument("--dir", default=".")
     su.add_argument("--headers", help="กล่องที่จะสำรวจ (ค่าเริ่มต้น: จากไฟล์ ecus_ ล่าสุด)")
     su.add_argument("--ranges", help="ช่วง DID (ค่าเริ่มต้น F000-FFFF,D000-EFFF,0000-CFFF)")
     su.add_argument("--force", action="store_true")
+    su.add_argument("--file", help="digest: สรุปไฟล์นี้แทน (เช่น scan_*.csv)")
+    su.add_argument("--all", action="store_true",
+                    help="digest: สรุปทั้งหมด ไม่ใช่แค่ของใหม่")
     su.set_defaults(func=cmd_survey)
 
     so = sub.add_parser("soh", help="วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)")

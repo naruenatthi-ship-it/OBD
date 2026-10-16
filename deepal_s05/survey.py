@@ -202,3 +202,81 @@ class Survey:
 
 def _now():
     return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+# -- digest: a short text of the results to send in a chat ---------------
+# Raw survey files are mostly long runs of 00 in hex; pasted whole they
+# cost a lot to read. The digest keeps what is worth a look.
+DIGEST_FILE = "survey_digest.txt"
+DIGEST_MARK = ".survey_digest_last"
+# ECU name, part and version DIDs: one line per ECU is enough
+IDENTITY_DIDS = set(range(0xF180, 0xF1A0)) | {0xF010, 0xF089, 0xF120,
+                                              0xF121, 0xF122, 0xF123,
+                                              0xF170, 0xF171}
+SHOW_BYTES = 16
+
+
+def _short(raw_hex):
+    """Text when the bytes read as text, else the first bytes in hex."""
+    if raw_hex.startswith("("):  # (ซ่อน): private, never shown
+        return raw_hex
+    try:
+        b = bytes.fromhex(raw_hex)
+    except ValueError:
+        return raw_hex[:2 * SHOW_BYTES]
+    text = b.rstrip(b"\0 ")
+    if len(text) >= 3 and all(32 <= c < 127 for c in text):
+        return "'%s'" % text.decode()
+    if len(b) <= SHOW_BYTES:
+        return raw_hex
+    return "%s…(%dB)" % (raw_hex[:2 * SHOW_BYTES], len(b))
+
+
+def _blank(raw_hex):
+    """All 00 or all FF: nothing to read in it."""
+    digits = set(raw_hex.upper())
+    return bool(raw_hex) and (digits <= {"0"} or digits <= {"F"})
+
+
+def digest(path, since=""):
+    """Lines for people: per ECU the identity in one line, the other DIDs
+    one per line (values that changed between reads as old→new), and how
+    many were all 00/FF. Only rows newer than `since` (ISO time) when
+    given. Returns (lines, time of the newest row)."""
+    from .snapshot import no_nul
+    seen = {}       # (header, did) -> list of raws in order
+    newest = ""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for r in csv.DictReader(no_nul(f)):
+            t = (r.get("time") or "").strip()
+            if since and t and t <= since:
+                continue
+            newest = max(newest, t)
+            key = ((r.get("header") or "").strip(), (r.get("did") or "").upper())
+            raws = seen.setdefault(key, [])
+            raw = (r.get("raw") or "").strip()
+            if not raws or raws[-1] != raw:
+                raws.append(raw)
+    out = []
+    for header in sorted({h for h, _ in seen}):
+        dids = sorted(d for h, d in seen if h == header)
+        ident, rest, blank = [], [], 0
+        for did in dids:
+            raws = seen[(header, did)]
+            try:
+                n = int(did, 16)
+            except ValueError:
+                n = -1
+            if len(raws) == 1 and _blank(raws[0]):
+                blank += 1
+            elif n in IDENTITY_DIDS and len(raws) == 1:
+                ident.append("%s=%s" % (did, _short(raws[0])))
+            else:
+                rest.append("  %s %s" % (did, " → ".join(_short(x)
+                                                          for x in raws)))
+        out.append("== %s: %d DID (00/FF ล้วน %d) ==" % (header, len(dids),
+                                                         blank))
+        if ident:
+            out.append("  รหัส: " + " ".join(ident))
+        out.extend(rest)
+    return out, newest

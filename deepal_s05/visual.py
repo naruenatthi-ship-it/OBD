@@ -20,7 +20,7 @@ from . import dtc, pids
 from .report import nice_ticks, tick_label
 from . import snapshot
 
-# ECUs whose job is confirmed on a real car (see docs/TODO.md)
+# ECUs whose job is confirmed on a real car (see docs/RESULTS.md)
 ECU_NAMES = {
     "deepal-s05": {
         "7A1": "แบตเตอรี่ไฟแรงสูง (BMS)",

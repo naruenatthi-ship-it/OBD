@@ -254,6 +254,9 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 if name.endswith(".html"):  # open saved pages in place
                     self.send_body(body, "text/html; charset=utf-8")
                     return
+                if name.endswith(".txt"):  # digests: read and copy on a phone
+                    self.send_body(body, "text/plain; charset=utf-8")
+                    return
                 self.send_body(body, "application/octet-stream", [
                     ("Content-Disposition",
                      "attachment; filename*=UTF-8''%s"

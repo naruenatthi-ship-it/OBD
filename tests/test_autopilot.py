@@ -148,6 +148,7 @@ def test_dashboard_files_routes(tmp_path):
     (tmp_path / "drive_20270101.csv").write_text("time,soc\n1,80\n",
                                                  encoding="utf-8")
     (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "survey_digest.txt").write_text("สรุป", encoding="utf-8")
     state = autopilot.State([], [])
     server = dashboard.make_server(state, "127.0.0.1", 0, str(tmp_path))
     port = server.server_address[1]
@@ -159,6 +160,9 @@ def test_dashboard_files_routes(tmp_path):
         body = urllib.request.urlopen(
             base + "/files/drive_20270101.csv").read()
         assert body == b"time,soc\n1,80\n"
+        body = urllib.request.urlopen(base + "/files/survey_digest.txt")
+        assert body.headers["Content-Type"].startswith("text/plain")
+        assert body.read() == "สรุป".encode()
         for bad in ("/files/secret.txt", "/files/..%2F..%2Fetc%2Fpasswd"):
             with pytest.raises(urllib.error.HTTPError):
                 urllib.request.urlopen(base + bad)
