@@ -246,6 +246,17 @@ class Autopilot:
             self.state.update(status="รถตื่น กำลังบันทึก · " +
                               self.survey.status())
             return 0.5
+        if self.survey.load():
+            # say why the survey is waiting, so the page still shows it
+            if self.survey.active():
+                why = "รอ: อ่านรอบมอเตอร์ไม่ได้" if rpm is None else \
+                    "รอ: กำลังขับ" if self.still_since is None else \
+                    "รอจอดนิ่งครบ %d นาที" % (SURVEY_STILL_S // 60)
+            else:
+                why = ""
+            self.state.update(status="รถตื่น กำลังบันทึก · " +
+                              self.survey.status() +
+                              (" · " + why if why else ""))
         return self.interval
 
     def run_predict(self):
@@ -279,6 +290,8 @@ class Autopilot:
                 log.write(snapshot.Snapshot(now, {"aux_12v": v12}))
             self.last_rest_log = now
         status = "รถหลับ ไม่ส่งข้อความเข้ารถ · แบต 12V %.2f V" % v12
+        if self.survey.load():
+            status += " · " + self.survey.status()
         if self.shutdown_below is not None and v12 < self.shutdown_below:
             if self.low_since is None:
                 self.low_since = now

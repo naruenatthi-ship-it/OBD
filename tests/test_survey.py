@@ -138,3 +138,14 @@ def test_stop_waits_for_the_car_to_sleep(tmp_path, monkeypatch):
     pilot.clock.t += autopilot.SURVEY_STILL_S
     pilot.step()
     assert elm.asked                       # started again: carries on
+
+
+def test_page_shows_survey_progress_while_it_waits(tmp_path, monkeypatch):
+    pilot, elm = make_pilot(tmp_path, monkeypatch, [13.9], {
+        "soc": 80, "pack_current": 60.0, "motor_rpm": 4000})
+    pilot.step()                           # driving: waits, still shown
+    status = pilot.state.data["status"]
+    assert "สำรวจ 0.0%" in status and "รอ: กำลังขับ" in status
+    elm.volts = [12.4]
+    pilot.step()                           # asleep
+    assert "สำรวจ" in pilot.state.data["status"]
