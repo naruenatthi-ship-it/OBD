@@ -30,7 +30,9 @@ usage() {
   live             ดูค่าสดในหน้าจอ (Ctrl+C เพื่อหยุด)
   rec [ชื่อ] [นาที]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
                    เช่น obd rec drive 20 (ปิด Termius/ล็อกจอขับได้เลย)
-  stop             หยุด obd rec ก่อนเวลา
+  stop             หยุดงานเบื้องหลัง (obd rec / obd bg)
+  bg <คำสั่ง>       สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น obd bg scan 7A4,742 0100-EFFF
+  log              ดูความคืบหน้าของงานเบื้องหลังล่าสุด
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
   pair             จับคู่กล่อง OBD ใหม่
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
@@ -114,21 +116,47 @@ do_command() {
             echo "เริ่มบันทึก '$name' $minutes นาที (DID จาก $(basename "$scan"))"
             echo "ทำงานเบื้องหลัง ปิด Termius หรือล็อกจอได้เลย"
             echo "ไฟล์: rec_${name}_$STAMP.csv  หยุดก่อนเวลา: obd stop" ;;
+        bg)
+            if [ $# -lt 1 ]; then
+                echo "ใส่คำสั่งด้วย เช่น obd bg scan 7A4,742 0100-EFFF"
+                return 1
+            fi
+            nohup bash "$0" _bg "$@" > "$DATA/bg_$STAMP.log" 2>&1 &
+            echo "เริ่มงานเบื้องหลัง: obd $*"
+            echo "ปิด Termius หรือล็อกจอได้เลย ดูความคืบหน้า: obd log  หยุด: obd stop" ;;
+        _bg)
+            echo $$ > "$DATA/.bg.pid"
+            do_command "$@"
+            echo "== เสร็จแล้ว ==" ;;
+        log)
+            local last
+            last=$(ls -t "$DATA"/bg_*.log "$DATA"/rec_*.log 2>/dev/null | head -1)
+            if [ -z "$last" ]; then
+                echo "ยังไม่มีงานเบื้องหลัง"
+            else
+                echo "== $(basename "$last") =="
+                tail -n 15 "$last"
+            fi ;;
         _rec)
             echo $$ > "$DATA/.rec.pid"
             run record --dids-from "$3" --note "$1" \
                 --duration "$(( ${2:-20} * 60 ))" \
                 --csv "$DATA/rec_${1}_$STAMP.csv" ;;
         stop)
-            # the recorder runs as a child of the obd _rec job; background
-            # jobs ignore SIGINT, so TERM (the program treats it as Ctrl+C)
-            local pid
-            pid=$(cat "$DATA/.rec.pid" 2>/dev/null)
-            if [ -n "$pid" ] && pkill -TERM -P "$pid" 2>/dev/null; then
-                rm -f "$DATA/.rec.pid"
-                echo "หยุดการบันทึกแล้ว (โหมดอัตโนมัติจะเปิดคืนเอง)"
+            # background jobs run as children of an obd _rec/_bg process;
+            # they ignore SIGINT, so TERM (the program treats it as Ctrl+C)
+            local f pid stopped=0
+            for f in "$DATA/.rec.pid" "$DATA/.bg.pid"; do
+                pid=$(cat "$f" 2>/dev/null)
+                if [ -n "$pid" ] && pkill -TERM -P "$pid" 2>/dev/null; then
+                    stopped=1
+                fi
+                rm -f "$f"
+            done
+            if [ "$stopped" = 1 ]; then
+                echo "หยุดงานเบื้องหลังแล้ว (โหมดอัตโนมัติจะเปิดคืนเอง)"
             else
-                echo "ไม่มีการบันทึกที่กำลังทำงานอยู่"
+                echo "ไม่มีงานเบื้องหลังที่กำลังทำงานอยู่"
             fi ;;
         pair)    bash "$APP/pi/pair.sh" "$@" ;;
         status)
@@ -154,7 +182,7 @@ menu() {
                  "ir  วัด IR (ให้คนอื่นขับ)" "checkup  ตรวจรถรายสัปดาห์"
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
-                 "trip  สรุปทริป (km, kWh/100 km)"
+                 "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
                  "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"
