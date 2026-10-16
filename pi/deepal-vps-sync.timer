@@ -1,0 +1,9 @@
+[Unit]
+Description=Copy Deepal OBD data to the VPS every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target

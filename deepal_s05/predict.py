@@ -79,6 +79,40 @@ def read_rows(paths):
     return rows
 
 
+SLIM_KEYS = ("time", "soc", "pack_voltage", "pack_current", "batt_temp_max",
+             "motor_rpm", "motor_torque", "motor_temp", "inverter_temp")
+
+
+def read_drive(folder, patterns=("drive_*.csv",), days=90, cell_every=10):
+    """Recordings, kept small enough for a Pi Zero (512 MB): only the
+    files of the last `days`, only the columns the checks use, and the
+    120 cell voltages only on every `cell_every`-th row and near full
+    charge (SOC >= 95, for the fingerprint)."""
+    from .datafiles import recorded_time
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    paths = []
+    for pattern in patterns:
+        for p in files(folder, pattern):
+            if recorded_time(os.path.basename(p),
+                             os.path.getmtime(p)) >= cutoff:
+                paths.append(p)
+    rows = []
+    for p in sorted(paths):
+        try:
+            with open(p, newline="", encoding="utf-8") as f:
+                for n, r in enumerate(csv.DictReader(f)):
+                    slim = {k: r.get(k) for k in SLIM_KEYS if r.get(k)}
+                    soc = num(r.get("soc"))
+                    if n % cell_every == 0 or (soc is not None and soc >= 95):
+                        slim.update((k, v) for k, v in r.items()
+                                    if v and CELL_KEY.match(k))
+                    rows.append(slim)
+        except (OSError, csv.Error):
+            continue
+    rows.sort(key=lambda r: r.get("time") or "")
+    return rows
+
+
 def files(folder, pattern):
     return sorted(glob.glob(os.path.join(folder, pattern)))
 
@@ -159,7 +193,8 @@ def sessions(rows):
         if prev is None or (t - prev).total_seconds() > SESSION_GAP_S:
             cur = []
             out.append(cur)
-        cur.append(dict(r, _t=t))
+        r["_t"] = t  # in place: a copy per row is too much for a Pi Zero
+        cur.append(r)
         prev = t
     result = []
     for s in out:
@@ -363,6 +398,88 @@ def check_weak_cell(drive_sessions):
     return f
 
 
+def _corr(xs, ys):
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    return sxy / (sxx * syy) ** 0.5 if sxx and syy else 0.0
+
+
+def cell_deviations(rows):
+    """Per row with cell voltages: {cell: mV from the pack mean}."""
+    out = []
+    for r in rows:
+        cells = {}
+        for k, v in r.items():
+            m = CELL_KEY.match(k)
+            if m and num(v) is not None:
+                cells[int(m.group(1))] = num(v)
+        if len(cells) >= 8:
+            mean = statistics.mean(cells.values())
+            out.append({c: (v - mean) * 1000 for c, v in cells.items()})
+    return out
+
+
+def module_groups(devs, min_rows=30):
+    """Split the pack into modules from behaviour: neighbouring cells in
+    one module move together (high correlation of their deviations);
+    across a module joint the correlation drops. Returns [(first, last)]
+    cell numbers, or None when no such structure shows."""
+    if len(devs) < min_rows:
+        return None
+    cells = sorted(set.intersection(*(set(d) for d in devs)))
+    if len(cells) < 8:
+        return None
+    series = {c: [d[c] for d in devs] for c in cells}
+    corr = [_corr(series[a], series[b]) for a, b in zip(cells, cells[1:])]
+    med = statistics.median(corr)
+    mad = statistics.median(abs(c - med) for c in corr)
+    if mad == 0:
+        return None
+    cuts = [k for k, c in enumerate(corr) if c < med - 4 * mad]
+    if not cuts or len(cuts) > len(cells) // 3:
+        return None
+    groups, start = [], 0
+    for k in cuts:
+        groups.append((cells[start], cells[k]))
+        start = k + 1
+    groups.append((cells[start], cells[-1]))
+    return groups
+
+
+def check_modules(drive_sessions):
+    part = "โมดูลแบต (กลุ่มเซลล์)"
+    advice = ("แบ่งโมดูลจากพฤติกรรม: เซลล์ในโมดูลเดียวกันแรงดันขึ้นลงพร้อมกัน"
+              " แล้วดูว่าโมดูลไหนขึ้นนำตอนชาร์จเกือบเต็ม (ความจุน้อยกว่าเพื่อน)"
+              " และนำห่างขึ้นเรื่อยๆ ไหม")
+    rows = [r for _, s in drive_sessions for r in s]
+    groups = module_groups(cell_deviations(rows))
+    if not groups:
+        return Finding("modules", part, NODATA,
+                       "ยังแยกโมดูลไม่ได้ (ต้องมีข้อมูลรายเซลล์ตอนขับหลายร้อยจุด)",
+                       advice)
+    prints = cell_fingerprint(drive_sessions)
+
+    def module_dev(dev, g):
+        vals = [dev[c] for c in range(g[0], g[1] + 1) if c in dev]
+        return statistics.mean(vals) if vals else 0.0
+    text = "แยกได้ %d โมดูล" % len(groups)
+    if not prints:
+        return Finding("modules", part, OK, text + " · ยังไม่มีข้อมูลตอนชาร์จ"
+                       "เกือบเต็มไว้เทียบ", advice)
+    worst = max(groups, key=lambda g: module_dev(prints[-1][1], g))
+    pts = [(t, module_dev(dev, worst)) for t, dev in prints]
+    f = compare_to_own("modules", part, pts, "mV", True, 0.3, 0.6, "%.0f",
+                       advice, what="%s · โมดูลเซลล์ %d–%d นำค่าเฉลี่ย " % (
+                           text, worst[0], worst[1]))
+    if f.level == NODATA:
+        f.summary = "%s · โมดูลที่นำตอนเต็ม: เซลล์ %d–%d (+%.0f mV)" % (
+            text, worst[0], worst[1], pts[-1][1])
+    return f
+
+
 def check_battery_heating(drive_sessions):
     vals = []
     for kind, s in drive_sessions:
@@ -462,13 +579,15 @@ def check_codes(folder):
                    advice)
 
 
-def assess(folder):
+def assess(folder, capacity_kwh=56.1):
     """All checks, worst first."""
-    rows = read_rows(files(folder, "drive_*.csv"))
-    sess = sessions(rows)
+    from . import soh
+    sess = sessions(read_drive(folder))
     found = [
+        soh.check_soh(folder, capacity_kwh),
         check_12v_rest(folder), check_12v_ready(folder),
-        check_weak_cell(sess), check_cell_spread(folder), check_ir(folder),
+        check_weak_cell(sess), check_modules(sess),
+        check_cell_spread(folder), check_ir(folder),
         check_battery_heating(sess), check_pack_temp_spread(folder),
         check_motor_heating(sess), check_drive_efficiency(sess),
         check_codes(folder), check_insulation(folder),

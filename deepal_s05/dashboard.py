@@ -141,7 +141,7 @@ def files_page(data_dir):
             '<a href="/trends">กราฟแนวโน้ม</a> · '
             '<a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · '
             '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · '
-            '<a href="/health">เตือนล่วงหน้า</a></p>'
+            '<a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></p>'
             '<p><small>เรียงตามเวลาที่บันทึก ใหม่สุดอยู่บน · %d ไฟล์ รวม %s · '
             'การ์ดเหลือที่ว่าง %s · ลบไฟล์ที่ไม่จำเป็นด้วยคำสั่ง obd clean'
             '</small></p>%s</body>'
@@ -165,22 +165,33 @@ def _health_page(data_dir):
     return predict.predict_html(predict.assess(data_dir))
 
 
+def _cost_page(data_dir):
+    from . import cost
+    return cost.cost_html(data_dir)
+
+
 # scanner-style pages built on request from the files in data_dir
 VISUAL_PAGES = {
     "/topology": lambda v, d, car: v.topology_html(v.load_topology(d), car),
     "/dyno": lambda v, d, car: v.dyno_html(v.drive_files(d)),
     "/charge": lambda v, d, car: v.charge_curve_html(v.charge_files(d)),
     "/health": lambda v, d, car: _health_page(d),
+    "/cost": lambda v, d, car: _cost_page(d),
     "/freeze": lambda v, d, car: v.freeze_html(
         (v.freeze_files(d) or [None])[-1]),
 }
 
 
 def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
-                car_name="Deepal S05", ir_path=None, car_key="deepal-s05"):
+                car_name="Deepal S05", ir_path=None, car_key="deepal-s05",
+                password=None):
     """`poller` only needs a json() method. With `data_dir`, /files lists
     and serves the data files and /trends draws the trend charts. /ir
-    serves the per-cell IR file at `ir_path` (default: in data_dir)."""
+    serves the per-cell IR file at `ir_path` (default: in data_dir).
+    With `password`, every page asks for it (HTTP basic auth, any user
+    name) - for a copy on a server reachable from the internet."""
+    import base64
+    import hmac
     page = PAGE.replace("Deepal S05", html.escape(car_name))
     if ir_path is None and data_dir:
         ir_path = os.path.join(data_dir, CELL_IR_FILE)
@@ -196,7 +207,28 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
             self.end_headers()
             self.wfile.write(body)
 
+        def authorized(self):
+            if not password:
+                return True
+            got = self.headers.get("Authorization", "")
+            if got.startswith("Basic "):
+                try:
+                    user_pw = base64.b64decode(got[6:]).decode("utf-8")
+                except ValueError:
+                    user_pw = ""
+                if hmac.compare_digest(user_pw.partition(":")[2].encode(),
+                                       password.encode()):
+                    return True
+            self.send_response(401)
+            self.send_header("WWW-Authenticate",
+                             'Basic realm="deepal-obd", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
         def do_GET(self):
+            if not self.authorized():
+                return
             path = urllib.parse.urlparse(self.path).path
             if path.startswith("/data"):
                 self.send_body(poller.json().encode("utf-8"),
@@ -351,7 +383,7 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
 <header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
-<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a></nav></header>
+<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></nav></header>
 <div class="alerts" id="alerts"></div>
 <div class="summary" id="summary"></div>
 <nav class="tabs" role="tablist" aria-label="รายละเอียด">

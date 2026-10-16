@@ -33,6 +33,11 @@
 - หน้า `/files` เรียงตามเวลาในชื่อไฟล์ (ไม่ใช่เวลาแก้ล่าสุด) แบ่งตามวัน บอกขนาดรวมและที่ว่างในการ์ด
   · `obd clean` (`deepal_s05/datafiles.py`) ลบ log เก่า 7 วัน, .html, ผลครั้งเดียวเก่า 90 วัน (เก็บล่าสุด 3) ถามก่อนลบ
   ไม่แตะ drive_/charge_/rec_*.csv/scan_/aux12v_ และไฟล์ประวัติ
+- ชุดใหม่ (ยังไม่ได้ลองกับรถ/VPS จริง): `obd soh` (ความจุจากการชาร์จ), `obd cost` + `/cost` (tariff.json),
+  `obd canscan ชื่อ` + `obd cancompare` (ATMA ทีละ 32 id), โมดูลแบตใน `/health` (`predict.module_groups`),
+  `obd vps setup ผู้ใช้@VPS` → rsync ทุก 15 นาที (deepal-vps-sync.timer) + `serve` บน VPS (basic auth, crontab @reboot)
+  · VPS ของเจ้าของใช้เป็นบอท download/upload อยู่แล้ว ต้องเช็ก python3/rsync/พอร์ต 8080 ว่าว่าง
+  · predict อ่านไฟล์ขับ 90 วันล่าสุด เก็บเซลล์ทุก 10 แถว (~80 MB ต่อข้อมูล 1 เดือน ขับวันละชั่วโมง)
 - `obd telegram TOKEN` / `obd telegram`: บันทึก `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` ลง
   `/etc/default/deepal-obd` (chmod 640) หาเลขแชตจาก getUpdates ส่งข้อความทดสอบ แล้ว restart บริการ
   · ยังไม่เคยลองกับบอทจริง (ในเทสต์ใช้ API ปลอม) · ต้อง `obd update` ก่อน
@@ -69,7 +74,8 @@
    - ยืนยัน 80.9 rpm ต่อ km/h: จดเลขไมล์หน้าปัดก่อน/หลังขับ เทียบ `obd trip`
    - ชาร์จ AC ครั้งหน้า: ถ่ายจอรถ (V, A ไฟบ้าน) → ยืนยัน 7A4 FD23 และประสิทธิภาพ OBC (C)
    - ตั้ง Telegram (`obd telegram TOKEN`) · ลอง `/dyno`, `/charge`, `/health`
-2. **B: SOH จากการชาร์จ** (เขียนโค้ดได้เลย ข้อมูลมีใน drive_*.csv ที่ autopilot บันทึกตอนชาร์จ):
+2. ✅ B/C(ค่าไฟ)/D/E/G เขียนแล้ว รอลองจริง: ชาร์จ SOC ต่ำ→เต็มแล้ว `obd soh` · `obd canscan charging` vs `parked`
+   · `obd vps setup` · เดิม: **B: SOH จากการชาร์จ** (เขียนโค้ดได้เลย ข้อมูลมีใน drive_*.csv ที่ autopilot บันทึกตอนชาร์จ):
    รวม Ah จาก F229 ช่วง SOC ต่ำ→สูง ÷ ΔSOC → ความจุจริง เทียบ F238 = 148 Ah? → ใส่ใน `/health`
 3. **E: ดักฟัง CAN ตอนชาร์จ AC** หาค่าสดของ OBC ที่ 7A4 ไม่ให้อ่าน (BLE อาจรับไม่ทัน ต้องกรอง id)
 4. **D: ลายนิ้วมือเซลล์ / โมดูล** (ต่อยอด check_weak_cell ใน predict.py: จัดกลุ่มเซลล์ที่ขึ้นลงพร้อมกัน)
@@ -89,6 +95,8 @@
 | `deepal_s05/cli.py` | คำสั่งทั้งหมด (check, health, dtc, ecus, discover, record, trip, dashboard, autopilot…) |
 | `deepal_s05/dashboard.py` | หน้าเว็บ :8000 (แท็บเซลล์/อุณหภูมิ/IR/ข้อมูลแพ็ก, `/files`) |
 | `deepal_s05/alerts.py` | เกณฑ์เตือน + ส่งแจ้งเตือน (ntfy, Telegram, `multi_sender`, `Notifier` กันส่งซ้ำ) |
+| `deepal_s05/soh.py`, `cost.py`, `canscan.py`, `remote.py` | SOH จากการชาร์จ, ค่าไฟ, ดักฟัง CAN, หน้าเว็บบน VPS |
+| `pi/vps-serve.sh`, `pi/deepal-vps-sync.*` | ฝั่ง VPS เริ่มเว็บ / timer ส่งข้อมูลจาก Pi |
 | `deepal_s05/predict.py` | เตือนล่วงหน้า: แนวโน้ม + เทียบปกติของรถคันนี้ แยก session จาก drive_*.csv |
 | `deepal_s05/visual.py` | หน้าแผนผัง ECU, ไดโน + แผนที่ประสิทธิภาพ, กราฟชาร์จเทียบ SOC, ภาพนิ่งโค้ด (สร้างจากไฟล์) |
 | `deepal_s05/autopilot.py` | service อัตโนมัติบน Pi (อ่านเมื่อรถ READY, checkup, แจ้งเตือน ntfy) |

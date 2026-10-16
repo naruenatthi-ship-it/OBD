@@ -1521,9 +1521,119 @@ def cmd_visual(args):
     return 0
 
 
+def cmd_canscan(args):
+    from . import canscan
+    lo, hi = (int(x, 16) for x in args.ids.split("-"))
+    n = len(canscan.blocks(lo, hi))
+    print("ดักฟัง CAN ทีละช่วง %d ช่วง ช่วงละ %g วินาที (ราว %.0f นาที)"
+          " ฟังอย่างเดียว ไม่ส่งอะไรเข้ารถ" % (n, args.seconds,
+                                             n * (args.seconds + 1) / 60))
+
+    def progress(start, end, found):
+        print("  %03X-%03X  เจอแล้ว %d id" % (start, end, found),
+              file=sys.stderr)
+    with connect(args) as elm:
+        try:
+            rows, overflows, warnings = canscan.scan(
+                elm, args.seconds, lo, hi, progress)
+        except KeyboardInterrupt:
+            print("\nหยุดแล้ว")
+            return 1
+    for w in warnings:
+        print("คำเตือน: " + w)
+    canscan.save(args.save, rows)
+    print("\nเจอ %d id บันทึกไว้ที่ %s" % (len(rows), args.save))
+    if overflows:
+        print("กล่องรับไม่ทัน %d ครั้ง (บาง id อาจตกหล่น) ลองเพิ่ม --seconds"
+              % overflows)
+    print("เทียบสองสถานะ (เช่น ตอนชาร์จ กับ ตอนจอดเฉยๆ):"
+          " python -m deepal_s05 cancompare ไฟล์1 ไฟล์2")
+    return 0
+
+
+def cmd_cancompare(args):
+    from . import canscan
+    a, b = canscan.load(args.a), canscan.load(args.b)
+    d = canscan.compare(a, b)
+    name_a, name_b = os.path.basename(args.a), os.path.basename(args.b)
+
+    def show(title, ids, rows):
+        print("\n%s (%d)" % (title, len(ids)))
+        for k in ids:
+            r = rows[k]
+            print("  %s  %5s Hz  ไบต์ที่ขยับ [%s]  ตัวอย่าง %s" % (
+                k, r["hz"], r["moving_bytes"] or "-", r["sample"]))
+    show("มีเฉพาะใน %s" % name_a, d["only_a"], a)
+    show("มีเฉพาะใน %s" % name_b, d["only_b"], b)
+    print("\nมีทั้งสองแต่ขยับต่างกัน (%d)" % len(d["changed"]))
+    for k in d["changed"]:
+        print("  %s  %s: [%s] %s  |  %s: [%s] %s" % (
+            k, name_a, a[k]["moving_bytes"] or "-", a[k]["sample"],
+            name_b, b[k]["moving_bytes"] or "-", b[k]["sample"]))
+    return 0
+
+
+def cmd_cost(args):
+    from . import cost
+    tariff = cost.load_tariff(args.dir)
+    items = cost.charges(args.dir, tariff)
+    if not items:
+        print("ยังไม่มีการชาร์จที่บันทึกไว้")
+        return 1
+    print("%-8s %5s %10s %8s %10s %8s %9s" % (
+        "เดือน", "ครั้ง", "บ้าน kWh", "บ้าน ฿", "DC kWh", "DC ฿", "รวม ฿"))
+    for m, v in cost.monthly(items).items():
+        print("%-8s %5d %10.1f %8.0f %10.1f %8.0f %9.0f" % (
+            m, v["count"], v["ac_kwh"], v["ac_baht"], v["dc_kwh"],
+            v["dc_baht"], v["baht"]))
+    print("\nkWh = พลังงานที่เข้าแบต · ค่าไฟเป็นค่าตัวอย่าง แก้ให้ตรงบิลในไฟล์ %s"
+          % os.path.join(args.dir, cost.TARIFF_FILE))
+    return 0
+
+
+def cmd_serve(args):
+    """The pages from a copied data folder, without an adapter (on a
+    server the Pi syncs to)."""
+    from . import remote
+    password = os.environ.get(args.password_env, "")
+    if args.host not in ("127.0.0.1", "localhost") and not password:
+        print("เปิดให้เครื่องอื่นเข้าได้ต้องตั้งรหัสผ่านในตัวแปร %s ก่อน"
+              % args.password_env)
+        return 2
+    server = dashboard.make_server(
+        remote.LatestFile(args.data_dir), args.host, args.http_port,
+        args.data_dir, car_name=args.vehicle.name, car_key=args.car,
+        password=password or None)
+    print("เปิดหน้าเว็บจากไฟล์ใน %s ที่ http://%s:%d %s" % (
+        args.data_dir, args.host, args.http_port,
+        "(มีรหัสผ่าน)" if password else ""))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def cmd_soh(args):
+    from . import soh
+    ms, rated, table = soh.report(args.dir, args.capacity)
+    print("ความจุแบตวัดจากการชาร์จ (เทียบกับ %.0f Ah = %.1f kWh)\n" % (
+        rated, args.capacity))
+    if not ms:
+        print("ยังไม่มีการชาร์จที่วัดได้: ต้องชาร์จเพิ่มอย่างน้อย %d%% ในครั้งเดียว"
+              " ขณะที่ Pi บันทึกอยู่ (โหมดอัตโนมัติ หรือ obd charge)"
+              % soh.MIN_GAIN)
+        return 1
+    print(table)
+    print("\n* kWh ที่เข้าแบต (ฝั่ง DC) คิดเป็นแบตเต็ม 100%"
+          "\nSOC เป็นค่าที่ BMS ประมาณเอง ค่าจากการชาร์จจนเต็ม (✓เต็ม) แม่นที่สุด"
+          " ดูแนวโน้มหลายเดือน อย่าตัดสินจากครั้งเดียว")
+    return 0
+
+
 def cmd_predict(args):
     from . import predict
-    findings = predict.assess(args.dir)
+    findings = predict.assess(args.dir, args.capacity)
     print("เตือนล่วงหน้า: เทียบกับปกติของรถคันนี้ และแนวโน้มที่กำลังไป\n")
     for f in findings:
         print("%s %-34s %s" % (predict.LEVEL_ICON[f.level], f.part, f.summary))
@@ -2034,6 +2144,35 @@ def build_parser():
         vp.add_argument("--out", default=out)
         vp.set_defaults(func=cmd_visual, kind=kind)
 
+    cs = sub.add_parser("canscan",
+                        help="ดักฟัง CAN ที่รถกระจายเองทีละช่วง id (ฟังอย่างเดียว)")
+    cs.add_argument("--seconds", type=float, default=2.0,
+                    help="ฟังช่วงละกี่วินาที (ค่าเริ่มต้น 2)")
+    cs.add_argument("--ids", default="000-7FF", help="ช่วง id เช่น 000-7FF")
+    cs.add_argument("--save", default="canscan.csv")
+    cs.set_defaults(func=cmd_canscan)
+    cc = sub.add_parser("cancompare", help="เทียบผล canscan สองครั้ง")
+    cc.add_argument("a")
+    cc.add_argument("b")
+    cc.set_defaults(func=cmd_cancompare)
+
+    ct = sub.add_parser("cost", help="ค่าไฟการชาร์จรายเดือน (จากไฟล์ที่บันทึกไว้)")
+    ct.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    ct.set_defaults(func=cmd_cost)
+
+    sv = sub.add_parser("serve",
+                        help="เปิดหน้าเว็บจากไฟล์ที่ Pi ส่งมา โดยไม่ต้องต่อรถ (ใช้บน VPS)")
+    sv.add_argument("--data-dir", default=".")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--http-port", type=int, default=8080)
+    sv.add_argument("--password-env", default="OBD_WEB_PASSWORD",
+                    help="ชื่อตัวแปรที่เก็บรหัสผ่านหน้าเว็บ")
+    sv.set_defaults(func=cmd_serve)
+
+    so = sub.add_parser("soh", help="วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)")
+    so.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    so.set_defaults(func=cmd_soh)
+
     pr = sub.add_parser("predict",
                         help="เตือนล่วงหน้า: ชิ้นไหนเริ่มผิดปกติ/จะถึงเกณฑ์เมื่อไร"
                              " (จากไฟล์ที่บันทึกไว้)")
@@ -2073,7 +2212,8 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
-               cmd_visual, cmd_predict, cmd_clean)
+               cmd_visual, cmd_predict, cmd_clean, cmd_soh,
+               cmd_cancompare, cmd_cost, cmd_serve)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

@@ -14,6 +14,7 @@ STAMP=$(date +%Y%m%d-%H%M)
 source "$CONF"
 OBD_PORT=${OBD_PORT:-}
 OBD_OPTIONS=${OBD_OPTIONS:-}
+VPS_HOST=${VPS_HOST:-}
 # the program reads these from the environment (token stays off the
 # command line, where other users could see it)
 export TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
@@ -47,6 +48,12 @@ usage() {
   wifi             ดู WiFi ที่จำไว้และที่ต่ออยู่
   wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (เปิด Hotspot เมื่อไหร่ Pi ย้ายกลับมาเอง)
   wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
+  vps setup ผู้ใช้@เครื่อง [พอร์ตเว็บ]  ตั้งให้ส่งข้อมูลขึ้น VPS ทุก 15 นาที ดูรถจากที่ไหนก็ได้
+  vps sync / vps   ส่งข้อมูลขึ้น VPS เดี๋ยวนี้ / ดูสถานะ
+  soh              วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)
+  cost             ค่าไฟการชาร์จรายเดือน
+  canscan [ชื่อ]    ดักฟัง CAN ที่รถกระจายเอง (ฟังอย่างเดียว ~3 นาที) เช่น obd canscan charging
+  cancompare       เทียบ canscan สองครั้งล่าสุด
   telegram TOKEN   ตั้งแจ้งเตือนผ่าน Telegram (token จาก @BotFather)
   telegram         หาเลข chat / ส่งข้อความทดสอบ
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
@@ -153,6 +160,80 @@ page() {
     ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     echo "เปิดดูใน Safari: http://${ip:-deepal-pi.local}:8000$path"
     echo "(หรือไฟล์ $out ในหน้า /files)"
+}
+
+VPS_DIR=deepal-obd
+
+vps_ssh() {
+    ssh -o BatchMode=yes -o ConnectTimeout=15 -p "${VPS_SSH_PORT:-22}" \
+        "$VPS_HOST" "$@"
+}
+
+vps_sync() {
+    if [ -z "${VPS_HOST:-}" ]; then
+        echo "ยังไม่ได้ตั้ง VPS: obd vps setup ผู้ใช้@เครื่อง"
+        return 1
+    fi
+    local rsh="ssh -o BatchMode=yes -o ConnectTimeout=15 -p ${VPS_SSH_PORT:-22}"
+    # scans and job logs can hold ECU identifiers: they stay on the Pi
+    rsync -az -e "$rsh" --exclude 'scan_*' --exclude '*.log' \
+        --exclude 'predict_state.json' "$DATA/" "$VPS_HOST:$VPS_DIR/data/" &&
+    rsync -az --delete -e "$rsh" --exclude '__pycache__' \
+        "$APP/" "$VPS_HOST:$VPS_DIR/app/" &&
+    vps_ssh "sh $VPS_DIR/app/pi/vps-serve.sh ${VPS_WEB_PORT:-8080}" &&
+    date '+%F %T' > "$DATA/.vps_synced"
+}
+
+vps() {
+    local action=${1:-status}
+    case "$action" in
+        setup)
+            local host=${2:-} port=${3:-8080} sshport=${4:-22} pw
+            if ! [[ "$host" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$ ]] ||
+                    ! [[ "$port$sshport" =~ ^[0-9]+$ ]]; then
+                echo "ใช้แบบนี้: obd vps setup ผู้ใช้@ที่อยู่VPS [พอร์ตเว็บ 8080] [พอร์ต ssh 22]"
+                return 1
+            fi
+            command -v rsync >/dev/null || as_root apt-get install -y rsync
+            [ -f "$HOME/.ssh/id_ed25519" ] ||
+                ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -q
+            echo "==> ใส่รหัสผ่านของ VPS ครั้งเดียว (ต่อไป Pi จะใช้กุญแจแทน)"
+            ssh-copy-id -p "$sshport" -i "$HOME/.ssh/id_ed25519.pub" "$host" ||
+                return 1
+            set_conf VPS_HOST "$host"
+            set_conf VPS_WEB_PORT "$port"
+            set_conf VPS_SSH_PORT "$sshport"
+            VPS_HOST=$host VPS_WEB_PORT=$port VPS_SSH_PORT=$sshport
+            vps_ssh "command -v python3 >/dev/null && command -v rsync >/dev/null" || {
+                echo "VPS ต้องมี python3 และ rsync (Ubuntu/Debian: sudo apt install python3 rsync)"
+                return 1
+            }
+            pw=$(python3 -c 'import secrets; print(secrets.token_urlsafe(9))')
+            echo "$pw" | vps_ssh "mkdir -p $VPS_DIR/data && umask 077 && cat > $VPS_DIR/web_password"
+            vps_ssh "(crontab -l 2>/dev/null | grep -v vps-serve.sh; echo '@reboot sh \$HOME/$VPS_DIR/app/pi/vps-serve.sh $port') | crontab -"
+            echo "==> ส่งข้อมูลครั้งแรก (อาจนานหลายนาทีถ้าไฟล์เยอะ)"
+            vps_sync || return 1
+            sed "s/@USER@/$(id -un)/" "$APP/pi/deepal-vps-sync.service" |
+                as_root tee /etc/systemd/system/deepal-vps-sync.service >/dev/null
+            as_root cp "$APP/pi/deepal-vps-sync.timer" /etc/systemd/system/
+            as_root "$SYSTEMCTL" daemon-reload
+            as_root "$SYSTEMCTL" enable --now deepal-vps-sync.timer
+            echo
+            echo "เสร็จแล้ว เปิดดูจากที่ไหนก็ได้: http://${host#*@}:$port"
+            echo "ชื่อผู้ใช้: อะไรก็ได้   รหัสผ่าน: $pw   (จดไว้ ดูซ้ำได้ด้วย obd vps)"
+            echo "Pi จะส่งข้อมูลขึ้นเองทุก 15 นาทีที่มีเน็ต"
+            echo "ถ้าเปิดไม่ได้ ให้เปิดพอร์ต $port ใน firewall ของ VPS" ;;
+        sync)
+            vps_sync && echo "ส่งข้อมูลขึ้น VPS แล้ว" ;;
+        *)
+            if [ -z "${VPS_HOST:-}" ]; then
+                echo "ยังไม่ได้ตั้ง VPS: obd vps setup ผู้ใช้@เครื่อง"
+                return 1
+            fi
+            echo "VPS: $VPS_HOST  หน้าเว็บ: http://${VPS_HOST#*@}:${VPS_WEB_PORT:-8080}"
+            echo "ส่งข้อมูลล่าสุด: $(cat "$DATA/.vps_synced" 2>/dev/null || echo ยังไม่เคย)"
+            echo "รหัสผ่านหน้าเว็บ: $(vps_ssh "cat $VPS_DIR/web_password" 2>/dev/null || echo 'ต่อ VPS ไม่ได้')" ;;
+    esac
 }
 
 web() {
@@ -313,6 +394,22 @@ do_command() {
             web ;;
         web)     web ;;
         telegram) telegram "$@" ;;
+        vps)     vps "$@" ;;
+        soh|cost)
+            cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 "$cmd" \
+                --dir "$DATA" "$@" ;;
+        canscan)
+            run canscan --save "$DATA/canscan_${1:-scan}_$STAMP.csv" ;;
+        cancompare)
+            local a b
+            a=$(ls -t "$DATA"/canscan_*.csv 2>/dev/null | sed -n 2p)
+            b=$(ls -t "$DATA"/canscan_*.csv 2>/dev/null | sed -n 1p)
+            if [ -z "$a" ]; then
+                echo "ต้องมี canscan อย่างน้อย 2 ครั้ง เช่น obd canscan charging แล้ว obd canscan parked"
+                return 1
+            fi
+            cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 cancompare \
+                "$a" "$b" ;;
         update)
             local src
             src=$(cat "$APP/.source" 2>/dev/null || echo "$HOME/OBD")
@@ -341,7 +438,8 @@ menu() {
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
                  "topo  แผนผัง ECU ทั้งคัน" "freeze  ภาพนิ่งตอนเกิดโค้ด"
                  "dyno  ไดโน + แผนที่ประสิทธิภาพ" "chargecurve  กราฟการชาร์จ"
-                 "predict  เตือนล่วงหน้า" "clean  ลบไฟล์ที่ไม่จำเป็น"
+                 "predict  เตือนล่วงหน้า" "soh  วัดความจุแบตจริง"
+                 "cost  ค่าไฟการชาร์จ" "vps  สถานะ VPS" "clean  ลบไฟล์ที่ไม่จำเป็น"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
                  "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"
