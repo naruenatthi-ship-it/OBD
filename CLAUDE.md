@@ -25,7 +25,7 @@
   `deepal_s05/elm327.py`) ห้ามเพิ่มคำสั่งเขียนค่า ลบโค้ด หรือสั่งงาน (เช่น เปิด/ปิดวาล์ว ไม่ทำ)
 - ห้ามเก็บหรือแสดงเลข VIN / serial / ทะเบียนรถ ในไฟล์ที่ commit หรือคำตอบ (`PRIVATE_DIDS` ใน `cli.py`)
   แม้เจ้าของจะแปะผลที่มี VIN มาให้ ก็ห้ามพูดซ้ำ
-- ห้ามใส่ token, รหัส WiFi หรือ ntfy topic ลง repo
+- ห้ามใส่ token (รวม Telegram bot token), รหัส WiFi หรือ ntfy topic ลง repo
 
 ## ความปลอดภัยเวลาให้ทำกับรถ
 
@@ -55,7 +55,7 @@
 
 ## งานพัฒนา
 
-- branch: `claude/happy-hawking-6te6q7` · push ได้เมื่อเจ้าของอนุญาตงานนั้นแล้ว · ไม่เปิด PR ถ้าไม่ได้ขอ
+- branch: ดูใน [docs/HANDOFF.md](docs/HANDOFF.md) (ล่าสุด `claude/handoff-docs-continuation-3g6l2n`) · push ได้เมื่อเจ้าของอนุญาตงานนั้นแล้ว · ไม่เปิด PR ถ้าไม่ได้ขอ
 - เทสต์: `python3 -m pytest -q -p no:logging` (ประมาณ 1 นาที ใช้ตัวจำลอง ELM327-emulator 4.0.0 จาก git tag)
 - ก่อน push: clone ใหม่ลง scratchpad แล้วรันเทสต์ (เคยพลาดเพราะ `.gitignore` ตัดไฟล์ json ทดสอบ)
 - ข้อความที่ผู้ใช้เห็นเป็นภาษาไทย คอมเมนต์ในโค้ดเป็นภาษาอังกฤษ

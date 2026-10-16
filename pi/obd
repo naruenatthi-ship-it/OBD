@@ -14,6 +14,9 @@ STAMP=$(date +%Y%m%d-%H%M)
 source "$CONF"
 OBD_PORT=${OBD_PORT:-}
 OBD_OPTIONS=${OBD_OPTIONS:-}
+# the program reads these from the environment (token stays off the
+# command line, where other users could see it)
+export TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
 
 usage() {
     cat <<'EOF'
@@ -36,6 +39,8 @@ usage() {
   wifi             ดู WiFi ที่จำไว้และที่ต่ออยู่
   wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (เปิด Hotspot เมื่อไหร่ Pi ย้ายกลับมาเอง)
   wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
+  telegram TOKEN   ตั้งแจ้งเตือนผ่าน Telegram (token จาก @BotFather)
+  telegram         หาเลข chat / ส่งข้อความทดสอบ
   trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
   pair             จับคู่กล่อง OBD ใหม่
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
@@ -79,6 +84,56 @@ run() {
     # shellcheck disable=SC2086  # OBD_OPTIONS holds several options
     PYTHONPATH="$APP" python3 -m deepal_s05 --port "$OBD_PORT" \
         $OBD_OPTIONS "$@"
+}
+
+# write KEY=VALUE into the settings file (VALUE is checked by the caller)
+set_conf() {
+    if grep -q "^$1=" "$CONF"; then
+        as_root sed -i "s|^$1=.*|$1=$2|" "$CONF"
+    else
+        echo "$1=$2" | as_root tee -a "$CONF" >/dev/null
+    fi
+    # the bot token is a password: readable by root and this user only
+    as_root chgrp "$(id -gn)" "$CONF" && as_root chmod 640 "$CONF"
+}
+
+telegram() {
+    local token=${1:-} chats ids
+    if [ -n "$token" ]; then
+        if ! [[ "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+            echo "token ไม่ถูกรูปแบบ (หน้าตาแบบ 123456789:ABCdef...) ก๊อปจาก @BotFather ใหม่"
+            return 1
+        fi
+        set_conf TELEGRAM_BOT_TOKEN "$token"
+        export TELEGRAM_BOT_TOKEN=$token
+        echo "บันทึก token แล้ว"
+    fi
+    if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
+        echo "ยังไม่มี token: เปิด Telegram คุยกับ @BotFather พิมพ์ /newbot ตั้งชื่อบอท"
+        echo "แล้วก๊อป token ที่ได้มาใส่: obd telegram 123456789:ABCdef..."
+        return 1
+    fi
+    cd "$DATA" || return 1
+    if [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+        chats=$(PYTHONPATH="$APP" python3 -m deepal_s05 notify-test) || {
+            echo "$chats"
+            echo "ส่งข้อความอะไรก็ได้หาบอทใน Telegram ก่อน แล้วพิมพ์ obd telegram อีกครั้ง"
+            return 1
+        }
+        ids=$(echo "$chats" | awk '$1 ~ /^-?[0-9]+$/ {print $1}')
+        if [ "$(echo "$ids" | wc -l)" != 1 ]; then
+            echo "$chats"
+            echo "เจอหลาย chat: แก้ TELEGRAM_CHAT_ID ใน $CONF เอง (sudo nano $CONF)"
+            return 1
+        fi
+        set_conf TELEGRAM_CHAT_ID "$ids"
+        export TELEGRAM_CHAT_ID=$ids
+        echo "บันทึกเลข chat แล้ว"
+    fi
+    # shellcheck disable=SC2086  # OBD_OPTIONS holds several options
+    PYTHONPATH="$APP" python3 -m deepal_s05 $OBD_OPTIONS notify-test &&
+        as_root "$SYSTEMCTL" restart deepal-obd &&
+        echo "โหมดอัตโนมัติจะแจ้งเตือนเข้า Telegram แล้ว"
 }
 
 web() {
@@ -200,6 +255,7 @@ do_command() {
             journalctl -u deepal-obd -n 15 --no-pager
             web ;;
         web)     web ;;
+        telegram) telegram "$@" ;;
         update)
             local src
             src=$(cat "$APP/.source" 2>/dev/null || echo "$HOME/OBD")

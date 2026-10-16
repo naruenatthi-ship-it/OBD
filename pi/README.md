@@ -112,6 +112,7 @@ sudo nano /etc/default/deepal-obd
 ```
 
 - แจ้งเตือนเข้ามือถือ: `OBD_OPTIONS="--ntfy deepal-s05-ตั้งชื่อให้เดายาก"`
+- แจ้งเตือนเข้า Telegram: ไม่ต้องแก้ไฟล์นี้ ใช้ `obd telegram TOKEN` (ดู [docs/USAGE.md](../docs/USAGE.md))
 - ค่าที่หาเจอเพิ่ม (อุณหภูมิ OBC, แรงดันรายเซลล์): วางไฟล์ไว้ที่
   `/var/lib/deepal-obd/signals.json` แล้วเพิ่ม `--signals /var/lib/deepal-obd/signals.json`
 - ติดใน **Honda CR-V e:HEV**: ดูขั้นตอนใน [docs/CRV.md](../docs/CRV.md#ใช้กับ-raspberry-pi)
@@ -132,6 +133,7 @@ ssh เข้า Pi แล้วพิมพ์ **`obd`** จะขึ้นเ�
 | `obd live` | ดูค่าสดในหน้าจอ |
 | `obd bg <คำสั่ง>` | สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น `obd bg scan 7A4,742 0100-EFFF` · `obd log` ดูความคืบหน้า · `obd stop` หยุด |
 | `obd wifi` | ดู WiFi ที่จำไว้ · `obd wifi add "ชื่อ" "รหัส"` เพิ่ม WiFi สำรอง (เปิด Hotspot เมื่อไหร่ Pi ย้ายกลับมาภายใน 1–2 นาที) · `obd wifi remove "ชื่อ"` ลบ |
+| `obd telegram TOKEN` | ตั้งแจ้งเตือนเข้า Telegram (token จาก @BotFather ส่งข้อความหาบอทก่อน 1 ข้อความ) · `obd telegram` เฉยๆ ส่งข้อความทดสอบ |
 | `obd trip` | สรุปทุกทริปจากไฟล์บันทึก: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็วและความร้อนสูงสุด |
 | `obd rec drive 20` | บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที 20 นาที แบบเบื้องหลัง (ปิด Termius/ล็อกจอได้) · `obd stop` หยุดก่อนเวลา |
 | `obd status` / `obd web` | สถานะโหมดอัตโนมัติ / ที่อยู่หน้า dashboard |

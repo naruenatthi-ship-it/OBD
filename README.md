@@ -36,7 +36,7 @@
 | ⚡ **ฉนวนไฟแรงสูง** | เตือนเมื่อค่าฉนวนต่ำกว่าเกณฑ์มาตรฐาน (Ω/V) และเก็บลงกราฟแนวโน้ม เมื่อแกะ DID ได้แล้ว ตอนนี้จับจากโค้ดปัญหาไปก่อน |
 | 🩺 **ตรวจรถรายสัปดาห์** | `checkup` รวมค่าแบต แบต 12V และโค้ดปัญหาทุกกล่อง เทียบกับครั้งก่อน แล้วสรุปเป็น ✅ / ⚠️ / 🔴 |
 | 📈 **ดูแนวโน้มระยะยาว** | กราฟ SOH, ส่วนต่างเซลล์, แบต 12V, อุณหภูมิ, IR ของแพ็ก ช่วยเห็นสิ่งที่ค่อยๆ แย่ลง |
-| 🔔 **แจ้งเตือนเข้ามือถือ** | แบตร้อน, แบต 12V ต่ำ, เซลล์ไม่สมดุล, โค้ดปัญหาใหม่ ผ่านแอป [ntfy](https://ntfy.sh) (ฟรี) |
+| 🔔 **แจ้งเตือนเข้ามือถือ** | แบตร้อน, แบต 12V ต่ำ, เซลล์ไม่สมดุล, โค้ดปัญหาใหม่ ผ่านแอป [ntfy](https://ntfy.sh) (ฟรี) หรือ Telegram |
 | ⚡ **ชาร์จและบาลานซ์** | บันทึกระหว่างชาร์จ จับสัญญาณ OBC ลดกำลังเพราะร้อน เทียบชาร์จ 32A กับ 16A และเฝ้าดูการบาลานซ์ตอนเต็ม |
 | 🚗 **ทดสอบขับซ้ำ** | `drivetest` เร่งหรือขับเส้นทางเดิม แล้วเทียบกำลังสูงสุด แรงดันตก และ IR กับเดือนก่อน |
 | 🔧 **อ่านโค้ดปัญหา** | อ่านจากทุกกล่อง ECU บอกสถานะ และเทียบกับการสแกนครั้งก่อน (ไม่ลบโค้ด) |
@@ -170,7 +170,7 @@ ECU แบตเตอรี่ (BMS) header `7A1` → ตอบที่ `7A9`,
 
 Read-only monitoring of the **Deepal S05** (Changan) through a cheap ELM327 adapter: live battery
 data (SOC, pack voltage/current, min/max cell voltage, temperatures, SOH, 12 V), a phone-friendly
-dashboard, weekly health checkups with history and trend charts, push alerts via ntfy, charge and
+dashboard, weekly health checkups with history and trend charts, push alerts via ntfy or Telegram, charge and
 balancing logs, repeatable drive tests, trouble code reading with diffs, tools for reverse
 engineering unknown DIDs at home, and an unattended Raspberry Pi mode that never wakes a sleeping
 car. Only read-type UDS requests are ever sent. Battery DIDs come from

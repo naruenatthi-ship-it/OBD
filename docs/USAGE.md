@@ -179,6 +179,27 @@ python -m deepal_s05 --port COM5 --ntfy deepal-s05-k8x2m9q dashboard
 - ⚠️ ใครรู้ชื่อ topic ก็อ่านข้อความได้ ให้ตั้งชื่อที่เดายาก
   (หรือใช้เซิร์ฟเวอร์ ntfy ของตัวเองด้วย `--ntfy-server`)
 
+**หรือส่งเข้า Telegram** (ใช้คู่กับ ntfy ได้ ส่งทั้งสองทาง):
+
+1. ใน Telegram คุยกับ **@BotFather** พิมพ์ `/newbot` ตั้งชื่อบอท แล้วก๊อป token (หน้าตา `123456789:ABCdef...`)
+2. เปิดแชตกับบอทที่เพิ่งสร้าง ส่งข้อความอะไรก็ได้ 1 ข้อความ
+3. บน Raspberry Pi: `obd telegram 123456789:ABCdef...` (token ของคุณ) โปรแกรมจะหาเลขแชต บันทึก
+   และส่งข้อความทดสอบให้เอง หลังจากนั้นโหมดอัตโนมัติแจ้งเตือนเข้า Telegram
+   (คำสั่งนี้ใช้ได้หลัง `obd update`)
+
+บนคอม Windows (PowerShell):
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "123456789:ABCdef..."
+python -m deepal_s05 notify-test                      # บอกเลขแชต
+python -m deepal_s05 --port COM5 --telegram 42 dashboard
+```
+
+- token เก็บในตัวแปร `TELEGRAM_BOT_TOKEN` ไม่ใส่ในคำสั่ง (คนอื่นในเครื่องเห็นคำสั่งได้)
+  บน Pi เก็บใน `/etc/default/deepal-obd` ซึ่งอ่านได้เฉพาะ root และผู้ใช้ของเรา
+- 🔴 ส่งแบบมีเสียง ⚠️ ส่งแบบเงียบ (เข้าแชตแต่ไม่สั่น)
+- ใครได้ token ไปจะส่งข้อความในนามบอทได้ ถ้าหลุดให้สั่ง `/revoke` กับ @BotFather แล้วตั้งใหม่
+
 ## หน้าจอแสดงผลในเบราว์เซอร์ (dashboard)
 
 ```bash
@@ -419,7 +440,7 @@ deepal_s05/snapshot.py  อ่านค่าครบหนึ่งรอบ �
 deepal_s05/analysis.py  หาข้อมูลที่ดูเป็นแรงดันเซลล์, สรุปไฟล์ sniff, IR, สถานะบาลานซ์
 deepal_s05/dtc.py       แปลโค้ดปัญหา และเทียบกับการสแกนครั้งก่อน
 deepal_s05/identity.py  อ่านรหัส ECU/BMS และจับคู่รุ่นแบต
-deepal_s05/alerts.py    เกณฑ์แจ้งเตือน และส่งแจ้งเตือนผ่าน ntfy
+deepal_s05/alerts.py    เกณฑ์แจ้งเตือน และส่งแจ้งเตือนผ่าน ntfy / Telegram
 deepal_s05/report.py    รายงาน HTML พร้อมกราฟ และกราฟแนวโน้ม (trends)
 deepal_s05/dashboard.py หน้าจอสดในเบราว์เซอร์ (และหน้าไฟล์/กราฟแนวโน้มบน Pi)
 deepal_s05/autopilot.py โหมดอัตโนมัติสำหรับ Raspberry Pi ในรถ

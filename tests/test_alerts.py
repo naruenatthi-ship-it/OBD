@@ -200,3 +200,99 @@ def test_insulation_compared_with_usual(tmp_path):
         {"insulation_ohm_per_v": 12000}, usual), alerts.DEFAULT_RULES) == []
     assert "insulation_pct_of_normal" not in alerts.add_baselines(
         {"soc": 50}, usual)
+
+
+class FakeTelegram:
+    """Stands in for urllib.request.urlopen against the Telegram bot API."""
+
+    def __init__(self, updates=(), ok=True):
+        self.calls = []
+        self.updates = list(updates)
+        self.ok = ok
+
+    def __call__(self, req, timeout=None):
+        import io
+        import json
+        self.calls.append((req.full_url, json.loads(req.data)))
+        if not self.ok:
+            body = {"ok": False, "description": "Unauthorized"}
+        elif req.full_url.endswith("/getUpdates"):
+            body = {"ok": True, "result": self.updates}
+        else:
+            body = {"ok": True, "result": {}}
+        return io.BytesIO(json.dumps(body).encode())
+
+
+def test_telegram_sender(monkeypatch):
+    fake = FakeTelegram()
+    monkeypatch.setattr(alerts.urllib.request, "urlopen", fake)
+    send = alerts.telegram_sender("123:abc", "42")
+    send("Deepal S05", "แบตร้อน", "high")
+    send("Deepal S05", "เซลล์ต่างกัน", "default")
+    url, body = fake.calls[0]
+    assert url == "https://api.telegram.org/bot123:abc/sendMessage"
+    assert body["chat_id"] == "42"
+    assert body["text"] == "Deepal S05\nแบตร้อน"
+    assert body["disable_notification"] is False
+    assert fake.calls[1][1]["disable_notification"] is True
+
+
+def test_telegram_errors_reach_notifier(monkeypatch):
+    monkeypatch.setattr(alerts.urllib.request, "urlopen",
+                        FakeTelegram(ok=False))
+    n = alerts.Notifier(alerts.telegram_sender("123:abc", "42"))
+    assert n.notify([alert("a", alerts.WARN)]) == []
+    assert "Unauthorized" in n.error
+
+
+def test_telegram_chats(monkeypatch):
+    monkeypatch.setattr(alerts.urllib.request, "urlopen", FakeTelegram([
+        {"message": {"chat": {"id": 42, "first_name": "Nat"}}},
+        {"message": {"chat": {"id": 42, "first_name": "Nat"}}},
+        {"channel_post": {"chat": {"id": -100, "title": "รถ"}}},
+        {"edited_message": {}},
+    ]))
+    assert alerts.telegram_chats("123:abc") == [(42, "Nat"), (-100, "รถ")]
+
+
+def test_multi_sender_fails_only_when_all_fail():
+    got = []
+
+    def ok(t, m, p):
+        got.append(m)
+
+    def bad(t, m, p):
+        raise OSError("down")
+    alerts.multi_sender([bad, ok])("t", "m", "default")
+    assert got == ["m"]
+    with pytest.raises(OSError, match="down; down"):
+        alerts.multi_sender([bad, bad])("t", "m", "default")
+
+
+def test_notify_test_lists_telegram_chats(monkeypatch, capsys):
+    from deepal_s05 import cli
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setattr(alerts, "telegram_chats",
+                        lambda token: [(42, "Nat")])
+    assert cli.main(["notify-test"]) == 0
+    assert "42  Nat" in capsys.readouterr().out
+
+
+def test_notify_test_sends_to_chat_from_env(monkeypatch, capsys):
+    from deepal_s05 import cli
+    sent = []
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setattr(alerts, "telegram_sender",
+                        lambda token, chat: lambda t, m, p:
+                        sent.append((token, chat, m)))
+    assert cli.main(["notify-test"]) == 0
+    assert sent[0][:2] == ("123:abc", "42")
+
+
+def test_telegram_needs_token(monkeypatch):
+    from deepal_s05 import cli
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    with pytest.raises(SystemExit):
+        cli.main(["--telegram", "42", "notify-test"])

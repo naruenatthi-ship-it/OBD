@@ -38,6 +38,7 @@ OBD_PORT=rfcomm://00:00:00:00:00:00
 
 # ตัวเลือกเพิ่ม เช่น
 #   --ntfy deepal-s05-xxxxxxxx      ส่งแจ้งเตือนเข้ามือถือ
+#   (Telegram: ใช้คำสั่ง obd telegram TOKEN จะเพิ่ม TELEGRAM_* ท้ายไฟล์นี้ให้เอง)
 #   --signals /var/lib/deepal-obd/signals.json   ค่าที่หาเจอเพิ่ม
 #   --capacity 56.1                 ความจุแบต
 #   --car crv-hybrid --obdb /var/lib/deepal-obd/Honda-CR-V-Hybrid.json   ติดใน CR-V e:HEV (ดู docs/CRV.md)

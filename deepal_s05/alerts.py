@@ -12,6 +12,7 @@ practice, not Deepal specifications. Override or add rules in the
 """
 
 import csv
+import json
 import statistics
 import time
 import urllib.request
@@ -179,6 +180,65 @@ def ntfy_sender(server, topic):
             headers={"Title": title, "Priority": priority,
                      "Tags": "car"})
         urllib.request.urlopen(req, timeout=10).close()
+    return send
+
+
+TELEGRAM_API = "https://api.telegram.org"
+
+
+def _telegram_call(token, method, payload=None, api=TELEGRAM_API):
+    req = urllib.request.Request(
+        "%s/bot%s/%s" % (api.rstrip("/"), token, method),
+        data=json.dumps(payload or {}).encode("utf-8"), method="POST",
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        reply = json.loads(r.read().decode("utf-8"))
+    if not reply.get("ok"):
+        raise OSError("Telegram: %s" % reply.get("description", reply))
+    return reply["result"]
+
+
+def telegram_sender(token, chat_id, api=TELEGRAM_API):
+    """Send through a Telegram bot. Only "high" priority rings the phone
+    loudly; the rest arrive silently, like ntfy's default priority."""
+
+    def send(title, message, priority):
+        _telegram_call(token, "sendMessage", {
+            "chat_id": chat_id,
+            "text": "%s\n%s" % (title, message),
+            "disable_notification": priority not in ("high", "urgent"),
+        }, api)
+    return send
+
+
+def telegram_chats(token, api=TELEGRAM_API):
+    """Chats that recently messaged the bot, as [(chat_id, name)], so the
+    owner can find the id to pass to --telegram."""
+    seen = {}
+    for update in _telegram_call(token, "getUpdates", api=api):
+        msg = update.get("message") or update.get("channel_post") or {}
+        chat = msg.get("chat")
+        if chat:
+            name = chat.get("title") or " ".join(
+                x for x in (chat.get("first_name"), chat.get("last_name"))
+                if x) or chat.get("username") or ""
+            seen[chat["id"]] = name
+    return list(seen.items())
+
+
+def multi_sender(senders):
+    """Deliver to every channel. Fails only when all of them fail, so one
+    channel being down does not make the Notifier resend on the others."""
+
+    def send(title, message, priority):
+        errors = []
+        for s in senders:
+            try:
+                s(title, message, priority)
+            except Exception as e:
+                errors.append(str(e))
+        if errors and len(errors) == len(senders):
+            raise OSError("; ".join(errors))
     return send
 
 

@@ -4,7 +4,9 @@
 
 ## สถานะตอนนี้
 
-- โค้ดทั้งหมด commit และ push แล้วบน `claude/happy-hawking-6te6q7` (ไม่มี PR) · เทสต์ผ่าน 162 ตัว
+- โค้ดล่าสุดอยู่บน `claude/handoff-docs-continuation-3g6l2n` (ต่อจาก `claude/happy-hawking-6te6q7`, ไม่มี PR) · เทสต์ผ่าน 169 ตัว
+- session 2026-10-16 (ต่อ): เพิ่มแจ้งเตือน Telegram (`obd telegram TOKEN`, `--telegram CHAT_ID`,
+  คำสั่ง `notify-test`) ยังไม่มีผล scan จากเจ้าของ
 - ฮาร์ดแวร์ใช้งานจริงแล้ว: Pi Zero 2 W ในรถ + vLinker MC+ (BLE) → อ่าน BMS/เซลล์/มอเตอร์ของ Deepal ได้
 - เจ้าของเพิ่งต่อ Pi เข้า WiFi ที่ทำงานได้ และได้รับคำแนะนำให้:
   1. `obd update`
@@ -19,6 +21,9 @@
 - `deepal-hotspot.timer` (`pi/hotspot-first.sh`): ทุก 60 วิ ถ้าเห็น Hotspot และยังไม่ได้ต่อ → `nmcli connection up hotspot`
 - `obd wifi add/remove`, `obd off`, `obd reboot`, `obd bg`, `obd log`, คำใบ้ตอนพิมพ์ `obd 17` นอกเมนู
 - `discover` เขียน CSV ทีละแถว (ดับกลางคันผลไม่หาย)
+- `obd telegram TOKEN` / `obd telegram`: บันทึก `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` ลง
+  `/etc/default/deepal-obd` (chmod 640) หาเลขแชตจาก getUpdates ส่งข้อความทดสอบ แล้ว restart บริการ
+  · ยังไม่เคยลองกับบอทจริง (ในเทสต์ใช้ API ปลอม) · ต้อง `obd update` ก่อน
 
 ## เหตุการณ์ที่ควรรู้
 
@@ -51,7 +56,8 @@
    - G: VPS
    - H: เตือนจากแนวโน้ม
    - I: CR-V
-5. **งานเสริม**: ไฟล์ `.bat` สำหรับ Windows, ค่าไฟการชาร์จ, Telegram, เปลี่ยนชื่อ repo (เจ้าของตัดสินใจ)
+5. **งานเสริม**: ไฟล์ `.bat` สำหรับ Windows, ค่าไฟการชาร์จ, เปลี่ยนชื่อ repo (เจ้าของตัดสินใจ)
+   · Telegram ✅ เขียนแล้ว รอเจ้าของสร้างบอทแล้วลอง
 
 ## แผนที่โค้ดย่อ
 
@@ -64,6 +70,7 @@
 | `deepal_s05/identity.py` | อ่านรหัส ECU (F187…) และเดารุ่นแพ็กจากรหัส BMS |
 | `deepal_s05/cli.py` | คำสั่งทั้งหมด (check, health, dtc, ecus, discover, record, trip, dashboard, autopilot…) |
 | `deepal_s05/dashboard.py` | หน้าเว็บ :8000 (แท็บเซลล์/อุณหภูมิ/IR/ข้อมูลแพ็ก, `/files`) |
+| `deepal_s05/alerts.py` | เกณฑ์เตือน + ส่งแจ้งเตือน (ntfy, Telegram, `multi_sender`, `Notifier` กันส่งซ้ำ) |
 | `deepal_s05/autopilot.py` | service อัตโนมัติบน Pi (อ่านเมื่อรถ READY, checkup, แจ้งเตือน ntfy) |
 | `deepal_s05/analysis.py` | correlate, trip_summaries |
 | `pi/obd` | คำสั่งลัดบน Pi (ติดตั้งเป็น `/usr/local/bin/obd`) |
@@ -73,6 +80,7 @@
 ## วิธีเริ่มงานต่อ
 
 - ถามเจ้าของว่าผล scan ที่ทำงานเป็นยังไง (หรือให้ส่งไฟล์ `scan_*.csv` / ผล `obd log`)
+- ถามว่าอยากลอง Telegram ไหม (ขั้นตอนอยู่ใน docs/USAGE.md หัวข้อแจ้งเตือน)
 - ทุกคำสั่งบน Pi ให้เป็น `obd ...` บรรทัดเดียว
 - ถ้าแก้ `pi/obd` ต้องบอกให้ `obd update` ก่อนใช้
 - อัปเดตไฟล์นี้ทุกครั้งก่อนจบ session

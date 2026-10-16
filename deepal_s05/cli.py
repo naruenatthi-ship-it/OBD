@@ -999,6 +999,8 @@ def cmd_autopilot(args):
             argv += ["--signals", args.signals]
         if args.ntfy:
             argv += ["--ntfy", args.ntfy, "--ntfy-server", args.ntfy_server]
+        if args.telegram:
+            argv += ["--telegram", args.telegram]
         argv += ["checkup",
                  "--history", os.path.join(data_dir, "checkup_history.csv"),
                  "--dtc-history", os.path.join(data_dir, "dtc_history.json")]
@@ -1491,6 +1493,55 @@ def cmd_analyze(args):
     return 0
 
 
+def telegram_token():
+    return os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+
+
+def make_notifier(args, parser):
+    senders = []
+    if args.ntfy:
+        senders.append(alerts.ntfy_sender(args.ntfy_server, args.ntfy))
+    if args.telegram:
+        if not telegram_token():
+            parser.error("ใช้ --telegram ต้องตั้งตัวแปร TELEGRAM_BOT_TOKEN"
+                         " (token จาก @BotFather) ด้วย")
+        senders.append(alerts.telegram_sender(telegram_token(),
+                                              args.telegram))
+    if not senders:
+        return None
+    return alerts.Notifier(alerts.multi_sender(senders),
+                           name=args.vehicle.name)
+
+
+def cmd_notify_test(args):
+    token = telegram_token()
+    if token and not args.telegram:
+        try:
+            chats = alerts.telegram_chats(token)
+        except Exception as e:
+            print("ติดต่อ Telegram ไม่ได้: %s" % e)
+            return 1
+        if not chats:
+            print("บอทยังไม่ได้รับข้อความ: เปิด Telegram ค้นหาบอทของคุณ"
+                  " ส่งข้อความอะไรก็ได้ แล้วลองคำสั่งนี้อีกครั้ง")
+            return 1
+        print("เลข chat ที่ส่งข้อความหาบอท (ใส่หลัง --telegram):")
+        for chat_id, name in chats:
+            print("  %s  %s" % (chat_id, name))
+        return 0
+    if args.notifier is None:
+        print("ยังไม่ได้ตั้งช่องทางแจ้งเตือน ใส่ --ntfy TOPIC หรือ"
+              " --telegram CHAT_ID (พร้อมตัวแปร TELEGRAM_BOT_TOKEN)")
+        return 1
+    test = alerts.Alert(alerts.WARN, "notify_test", "ทดสอบ", 0, "",
+                        "ทดสอบการแจ้งเตือน ถ้าเห็นข้อความนี้แปลว่าใช้ได้แล้ว")
+    if not args.notifier.notify([test]):
+        print("ส่งไม่สำเร็จ: %s" % args.notifier.error)
+        return 1
+    print("ส่งข้อความทดสอบแล้ว ดูในมือถือได้เลย")
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="python -m deepal_s05",
@@ -1515,6 +1566,11 @@ def build_parser():
     p.add_argument("--ntfy", metavar="TOPIC",
                    help="ส่งแจ้งเตือนเข้ามือถือผ่านแอป ntfy (ตั้งชื่อ topic ให้เดายาก)")
     p.add_argument("--ntfy-server", default="https://ntfy.sh")
+    p.add_argument("--telegram", metavar="CHAT_ID",
+                   default=os.environ.get("TELEGRAM_CHAT_ID") or None,
+                   help="ส่งแจ้งเตือนเข้า Telegram (ใส่ token บอทไว้ในตัวแปร"
+                        " TELEGRAM_BOT_TOKEN ดูวิธีด้วยคำสั่ง notify-test)"
+                        " ค่าเริ่มต้นจากตัวแปร TELEGRAM_CHAT_ID")
     p.add_argument("--signals",
                    help="ไฟล์ JSON ค่าที่เพิ่มเอง (เช่น อุณหภูมิ OBC, แรงดันรายเซลล์)"
                         " ดูตัวอย่างใน examples/")
@@ -1744,6 +1800,11 @@ def build_parser():
                         " (ค่าเริ่มต้น cell_ir.json)")
     w.set_defaults(func=cmd_dashboard)
 
+    nt = sub.add_parser("notify-test",
+                        help="ส่งข้อความทดสอบไป ntfy/Telegram"
+                             " (และบอกเลข chat ของ Telegram)")
+    nt.set_defaults(func=cmd_notify_test)
+
     return p
 
 
@@ -1762,7 +1823,7 @@ def main(argv=None):
     if threading_main():
         signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
-               cmd_correlate, cmd_fetch_obdb, cmd_trip)
+               cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:
@@ -1789,9 +1850,7 @@ def main(argv=None):
     args.baselines = alerts.load_baselines(
         os.path.join(args.data_dir, "checkup_history.csv")
         if args.func is cmd_autopilot else "checkup_history.csv")
-    args.notifier = alerts.Notifier(
-        alerts.ntfy_sender(args.ntfy_server, args.ntfy),
-        name=args.vehicle.name) if args.ntfy else None
+    args.notifier = make_notifier(args, parser)
     try:
         return args.func(args)
     except ElmError as e:
