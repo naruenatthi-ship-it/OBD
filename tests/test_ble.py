@@ -95,3 +95,30 @@ def test_write_after_disconnect_raises():
 def test_bad_url():
     with pytest.raises(ValueError):
         ble.open_ble("ble://nope")
+
+
+def test_open_retries_after_dropping_stale_connection(monkeypatch):
+    calls, dropped = [], []
+
+    class Flaky(FakeClient):
+        async def connect(self):
+            calls.append(1)
+            if len(calls) == 1:
+                raise TimeoutError()
+            self.is_connected = True
+
+    monkeypatch.setattr(ble, "drop_stale_connection", dropped.append)
+    port = ble.open_ble("ble://C0:88:BE:81:C4:41", 0.05, Flaky)
+    port.close()
+    assert len(calls) == 2 and dropped == ["C0:88:BE:81:C4:41"]
+
+
+def test_timeout_has_a_message(monkeypatch):
+    class Dead(FakeClient):
+        async def connect(self):
+            raise TimeoutError()
+
+    monkeypatch.setattr(ble, "drop_stale_connection", lambda mac: None)
+    with pytest.raises(OSError) as e:
+        ble.open_ble("ble://C0:88:BE:81:C4:41", 0.05, Dead)
+    assert "หมดเวลา" in str(e.value)

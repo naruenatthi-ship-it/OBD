@@ -5,6 +5,7 @@ import csv
 import datetime
 import json
 import os
+import signal
 import sys
 import time
 import unicodedata
@@ -1002,6 +1003,9 @@ def cmd_autopilot(args):
     print("autopilot: เก็บข้อมูลที่ %s  หน้าจอ http://<IP>:%d" % (
         data_dir, args.http_port))
     stop = threading.Event()
+    # systemctl stop sends SIGTERM: finish the round and close the adapter,
+    # or a Bluetooth LE adapter stays connected and invisible to others
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
     try:
         pilot.run(stop)
     except KeyboardInterrupt:

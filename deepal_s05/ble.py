@@ -10,6 +10,9 @@ a notify characteristic (adapter -> us) and a write characteristic
 
 import asyncio
 import re
+import shutil
+import subprocess
+import sys
 import threading
 
 BLE_URL = re.compile(r"^ble://((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})$")
@@ -61,10 +64,14 @@ class BlePort:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         try:
             return future.result(timeout)
+        except TimeoutError as e:  # an OSError subclass with no message
+            future.cancel()
+            raise OSError("BLE: หมดเวลารอกล่องตอบ (กล่องอาจยังเชื่อมกับ"
+                          "โปรแกรมอื่นอยู่ หรือไม่มีไฟ)") from e
         except OSError:
             raise
-        except Exception as e:  # bleak errors, timeouts
-            raise OSError("BLE: %s" % (e or type(e).__name__)) from e
+        except Exception as e:  # bleak errors
+            raise OSError("BLE: %s" % (str(e) or type(e).__name__)) from e
 
     async def _open(self):
         await self.client.connect()
@@ -109,13 +116,34 @@ class BlePort:
             self.thread.join(2)
 
 
-def open_ble(url, timeout=0.2):
+def drop_stale_connection(mac):
+    """A program that was killed can leave BlueZ connected to the adapter,
+    and a connected BLE adapter stops advertising, so nobody else can
+    find it. Ask BlueZ to let go (Linux only)."""
+    if sys.platform.startswith("linux") and shutil.which("bluetoothctl"):
+        try:
+            subprocess.run(["bluetoothctl", "disconnect", mac],
+                           capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+def open_ble(url, timeout=0.2, client_factory=None):
     m = BLE_URL.match(url)
     if not m:
         raise ValueError("ใช้รูปแบบ ble://AA:BB:CC:DD:EE:FF")
+    mac = m.group(1)
+    if client_factory is None:
+        try:
+            from bleak import BleakClient
+        except ImportError:
+            raise OSError("ต้องติดตั้ง bleak ก่อน: sudo apt-get install -y "
+                          "python3-bleak (หรือ pip install bleak)")
+
+        def client_factory():
+            return BleakClient(mac, timeout=20.0)
     try:
-        from bleak import BleakClient
-    except ImportError:
-        raise OSError("ต้องติดตั้ง bleak ก่อน: sudo apt-get install -y "
-                      "python3-bleak (หรือ pip install bleak)")
-    return BlePort(BleakClient(m.group(1), timeout=20.0), timeout)
+        return BlePort(client_factory(), timeout)
+    except OSError:
+        drop_stale_connection(mac)  # then try once more
+        return BlePort(client_factory(), timeout)
