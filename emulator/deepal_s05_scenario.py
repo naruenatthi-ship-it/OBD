@@ -139,6 +139,7 @@ ObdMessage = {
                            MOTOR_RSP),
         # Gateway 700: odometer 42,817.4 km, 0.1 km little endian, as on
         # the real car
+        "ISO_CANDIDATE": entry("Insulation candidate", "F260", "1F 40"),
         "ODOMETER": entry("Odometer", "F1AE", "8E 88 06 00", "700", "708"),
         "MOTOR_OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31",
                              MOTOR_REQ, MOTOR_RSP),

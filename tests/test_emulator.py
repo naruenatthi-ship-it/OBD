@@ -62,7 +62,7 @@ def test_negative_response(url):
 def test_cli_check(url, tmp_path, capsys):
     out = tmp_path / "check.json"
     assert main(["--port", url, "check", "--save", str(out)]) == 0
-    assert "20 จาก 20" in capsys.readouterr().out
+    assert "21 จาก 21" in capsys.readouterr().out
     assert out.exists()
 
 

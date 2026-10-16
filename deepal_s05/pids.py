@@ -156,10 +156,22 @@ ODOMETER_SIGNALS = [
            "ยืนยันกับหน้าปัด 42,817 km (2026-10-16)", header="700"),
 ]
 
+# Insulation (HV bus to chassis) candidate: F260 read 0x1F40 = 8000 on the
+# BMS live and in both freeze frames (one taken at -125 A), the kind of
+# fixed ceiling an insulation monitor reports when the resistance is above
+# its range (8000 kOhm = 20,000 Ohm/V at 400 V, far above the 500 Ohm/V
+# warning). Logged under its own key so it cannot trigger the insulation
+# alerts until confirmed.
+INSULATION_CANDIDATES = [
+    Signal("iso_candidate_kohm", "ค่าฉนวน? (F260 รอยืนยัน)", 0xF260, "kΩ", 2,
+           EXPERIMENTAL, lambda d, c: _u16(d),
+           "ตัวเต็งค่าฉนวนไฟแรงสูง ยังไม่ยืนยัน ไม่ใช้แจ้งเตือน"),
+]
+
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
              "charge_temp", "motor_temp", "inverter_temp", "motor_rpm",
-             "motor_torque", "odometer_km"]
+             "motor_torque", "odometer_km", "iso_candidate_kohm"]
 
 
 # Above this charging current (A into the pack) it is a DC fast charge:
