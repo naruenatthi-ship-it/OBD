@@ -97,6 +97,7 @@ ObdMessage = {
         "PACK_I": entry("Pack current", "F229",
                         ["17 73", "18 19", "19 23"]),
         "PACK_P": entry("Pack power raw", "F236", "00 15 2A"),
+        "DC_ACCEPT": entry("Max charge kW accepted", "F233", "01 51"),
         "CELL_V_MAX": entry("Cell max voltage", "F250", "0D 03"),   # 3.331 V
         "CELL_V_MIN": entry("Cell min voltage", "F251", "0D 00"),   # 3.328 V
         "T_MAX": entry("Battery temp max", "F252", "47"),           # 31 C

@@ -487,3 +487,66 @@ def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
             "km_odometer": _odo_km(s),
             "batt_max": peak("batt")})
     return out
+
+
+class DcSession:
+    """Live view of a DC fast charge for the assistant card: what the
+    battery will accept (F233) against what the station delivers, the time
+    to a target SOC and the cost so far. update() is called with every
+    snapshot; it returns None when the car is not fast charging."""
+
+    END_GAP_S = 120  # no DC sample for this long = session over
+
+    def __init__(self, capacity_kwh, dc_price=7.5, target_soc=80,
+                 hot_c=40):
+        self.capacity, self.price = capacity_kwh, dc_price
+        self.target, self.hot = target_soc, hot_c
+        self.reset()
+
+    def reset(self):
+        self.kwh, self.last_t, self.start_soc = 0.0, None, None
+        self.recent = []  # [(time, supply_kw)]
+
+    def update(self, now, values):
+        supply = values.get("dc_supply_kw")
+        if supply is None:
+            if self.last_t is not None and now - self.last_t > self.END_GAP_S:
+                self.reset()
+            return None
+        soc = values.get("soc")
+        if self.last_t is not None and now - self.last_t > self.END_GAP_S:
+            self.reset()
+        if self.last_t is not None:
+            self.kwh += supply * (now - self.last_t) / 3600
+        if self.start_soc is None:
+            self.start_soc = soc
+        self.last_t = now
+        self.recent = [(t, p) for t, p in self.recent + [(now, supply)]
+                       if now - t <= 120]
+        avg = sum(p for _, p in self.recent) / len(self.recent)
+        accept = values.get("dc_accept_kw")
+        temp = values.get("batt_temp_max")
+        state, text = self._verdict(accept, avg, temp)
+        eta = None
+        if soc is not None and soc < self.target and avg > 1:
+            eta = (self.target - soc) / 100 * self.capacity / avg * 60
+        return {"accept_kw": accept, "supply_kw": supply, "avg_kw": avg,
+                "state": state, "text": text, "soc": soc,
+                "target": self.target, "eta_min": eta,
+                "reached": soc is not None and soc >= self.target,
+                "kwh": self.kwh, "baht": self.kwh * self.price,
+                "price": self.price, "temp": temp}
+
+    def _verdict(self, accept, avg, temp):
+        hot = temp is not None and temp >= self.hot
+        if accept is None or accept <= 0:
+            return "unknown", "อ่านกำลังที่แบตรับได้ (F233) ไม่ได้"
+        if avg < 0.75 * accept:
+            return "station", ("ตู้จ่ายน้อยกว่าที่แบตรับได้ (%.0f จาก %.0f kW)"
+                               " ช้าเพราะตู้ ลองย้ายหัวชาร์จ/ตู้อื่น"
+                               % (avg, accept))
+        if hot:
+            return "battery_hot", ("แบตรับได้แค่ %.0f kW และแบตร้อน %.0f °C"
+                                   " ช้าเพราะแบตร้อน" % (accept, temp))
+        return "battery", ("แบตรับได้ %.0f kW เต็มที่แล้ว ตู้จ่ายเต็มตามที่แบตรับ"
+                           % accept)
