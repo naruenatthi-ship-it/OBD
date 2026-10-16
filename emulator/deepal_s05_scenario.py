@@ -21,6 +21,8 @@ REQ = "7A1"
 RSP = "7A9"
 OBC_REQ = "761"
 OBC_RSP = "769"
+MOTOR_REQ = "7A7"
+MOTOR_RSP = "7AF"
 
 
 def answer(did, data, rsp=RSP):
@@ -123,6 +125,20 @@ ObdMessage = {
                          "59 02 FF 0A 80 00 08 C1 11 00 20"),
         "OBC_DTC": fixed("Trouble codes", "1902FF", "59 02 FF 05 62 16 09",
                          OBC_REQ, OBC_RSP),
+        # Electric drive, same layout as a real Thai S05 (values made up):
+        # 49 C motor, 53 C inverter, 3000 rpm, 25.0 Nm, 398 V
+        "MOTOR_TEMP": entry("Motor temperature", "FD0A", "59",
+                            MOTOR_REQ, MOTOR_RSP),
+        "INV_TEMP": entry("Inverter temperature", "FD1E", "5D",
+                          MOTOR_REQ, MOTOR_RSP),
+        "MOTOR_RPM": entry("Motor speed", "FD07", "59 D8", MOTOR_REQ,
+                           MOTOR_RSP),
+        "MOTOR_TQ": entry("Motor torque", "FD08", "10 9A", MOTOR_REQ,
+                          MOTOR_RSP),
+        "MOTOR_DCV": entry("DC link voltage", "FD1A", "01 8E", MOTOR_REQ,
+                           MOTOR_RSP),
+        "MOTOR_OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31",
+                             MOTOR_REQ, MOTOR_RSP),
         # Any other DID: requestOutOfRange, like a real ECU
         "OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31"),
         "OBC_OTHER": fixed("Unsupported DID", "22[0-9A-F]{4}", "7F 22 31",

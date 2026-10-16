@@ -80,6 +80,18 @@ DEEPAL_PACKS = [
 ]
 
 
+# Rough starting limits for the electric drive, not Changan specifications
+# (motor windings and inverter modules usually tolerate much more).
+DEEPAL_RULES = [
+    {"key": "motor_temp", "label": "อุณหภูมิมอเตอร์", "unit": "°C",
+     "warn_above": 110, "critical_above": 130,
+     "advice": "มอเตอร์ร้อนผิดปกติ ลดการขับหนัก และเช็กระบบน้ำหล่อเย็น"},
+    {"key": "inverter_temp", "label": "อุณหภูมิอินเวอร์เตอร์", "unit": "°C",
+     "warn_above": 85, "critical_above": 100,
+     "advice": "อินเวอร์เตอร์ (IPU) ร้อนผิดปกติ ลดการขับหนัก และเช็กระบบน้ำหล่อเย็น"},
+]
+
+
 def deepal_s05(**_):
     groups = [
         GroupArray("cells", "แรงดันรายเซลล์", "V",
@@ -89,8 +101,11 @@ def deepal_s05(**_):
     ]
     return Vehicle(
         key="deepal-s05", name="Deepal S05", protocol="6",
-        signals=list(pids.SIGNALS + pids.CELL_SIGNALS + pids.TEMP_SIGNALS),
+        signals=list(pids.SIGNALS + pids.CELL_SIGNALS + pids.TEMP_SIGNALS +
+                     pids.MOTOR_SIGNALS),
         live_keys=list(pids.LIVE_KEYS), groups=groups,
+        status_keys=["motor_temp", "inverter_temp"],
+        rule_overrides=list(DEEPAL_RULES),
         capacity=pids.DEFAULT_CAPACITY_KWH, default_header=pids.BMS_HEADER,
         source="jpires71/Deepal_S05_PIDs + รถไทย", bms_headers=(pids.BMS_HEADER,),
         cell_nominal_v=3.2, known_packs=list(DEEPAL_PACKS))

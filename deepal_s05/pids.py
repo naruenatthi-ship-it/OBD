@@ -117,9 +117,33 @@ TEMP_SIGNALS = [
            CANDIDATE, lambda d, c: d[0] - 40)
     for n, did in enumerate(TEMP_DIDS)]
 
+# Electric drive (motor controller "EDS2", 7A7 -> 7AF), from a 12-minute
+# drive on a Thai S05 Max (2026-10-16). Torque x speed matched pack power
+# (e.g. regen -42.5 Nm at 9256 rpm vs -103 A x 405 V = -41.8 kW), and
+# FD1A tracked F228 within 0.2 V on average. FD0A rose steadily 49 -> 69 C
+# (motor), FD1E jumped with current (inverter); their A-40 offset is the
+# BMS convention and not yet confirmed.
+MOTOR_HEADER = "7A7"
+MOTOR_SIGNALS = [
+    Signal("motor_temp", "อุณหภูมิมอเตอร์", 0xFD0A, "C", 1, CANDIDATE,
+           lambda d, c: d[0] - 40, "สูตร A-40 ยังรอยืนยัน",
+           header=MOTOR_HEADER),
+    Signal("inverter_temp", "อุณหภูมิอินเวอร์เตอร์", 0xFD1E, "C", 1,
+           CANDIDATE, lambda d, c: d[0] - 40, "สูตร A-40 ยังรอยืนยัน",
+           header=MOTOR_HEADER),
+    Signal("motor_rpm", "รอบมอเตอร์", 0xFD07, "rpm", 2, CANDIDATE,
+           lambda d, c: _u16(d) - 20000, header=MOTOR_HEADER),
+    Signal("motor_torque", "แรงบิดมอเตอร์", 0xFD08, "Nm", 2, CANDIDATE,
+           lambda d, c: (_u16(d) - 4000) / 10, "ลบ = เบรกชาร์จกลับ",
+           header=MOTOR_HEADER),
+    Signal("motor_dc_v", "แรงดันเข้าอินเวอร์เตอร์", 0xFD1A, "V", 2,
+           CANDIDATE, lambda d, c: _u16(d), header=MOTOR_HEADER),
+]
+
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
-             "charge_temp"]
+             "charge_temp", "motor_temp", "inverter_temp", "motor_rpm",
+             "motor_torque"]
 
 
 def derived(values):

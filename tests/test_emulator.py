@@ -62,7 +62,7 @@ def test_negative_response(url):
 def test_cli_check(url, tmp_path, capsys):
     out = tmp_path / "check.json"
     assert main(["--port", url, "check", "--save", str(out)]) == 0
-    assert "14 จาก 14" in capsys.readouterr().out
+    assert "19 จาก 19" in capsys.readouterr().out
     assert out.exists()
 
 
@@ -295,3 +295,11 @@ def test_discover_leaves_out_vin(url, tmp_path, capsys):
     assert main(["--port", url, "discover", "--header", "7A1", "--ranges",
                  "F190-F190", "--keep-ids", "--save", str(out)]) == 0
     assert "F190" in out.read_text(encoding="utf-8")
+
+
+def test_check_reads_motor_values(url, capsys):
+    assert main(["--port", url, "check"]) == 0
+    out = capsys.readouterr().out
+    assert "อุณหภูมิมอเตอร์" in out and " 49 C" in out
+    assert "รอบมอเตอร์" in out and "3000 rpm" in out
+    assert "25 Nm" in out and "398 V" in out
