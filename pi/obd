@@ -29,6 +29,10 @@ usage() {
   checkup          ตรวจรถรายสัปดาห์ (ค่าแบต + โค้ดปัญหาทุกกล่อง)
   dtc              อ่านโค้ดปัญหาทุกกล่อง (บันทึก dtc_วันเวลา.csv)
   ecus             หากล่อง ECU ทั้งหมด (บันทึก ecus_วันเวลา.csv)
+  topo             หากล่อง ECU + อ่านโค้ด แล้วดูแผนผังทั้งคันที่ /topology
+  freeze           อ่านภาพนิ่งตอนเกิดโค้ด (freeze frame) ว่ารถทำอะไรอยู่ตอนตั้งโค้ด
+  dyno             ไดโนจำลอง + แผนที่ประสิทธิภาพมอเตอร์ จากไฟล์บันทึกขับ
+  chargecurve      กราฟการชาร์จเทียบ SOC จากไฟล์ charge_
   scan HEADER [ช่วง]  สแกน DID เช่น obd scan 7A7 0100-01FF (ค่าเริ่มต้น F100-F3FF)
   live             ดูค่าสดในหน้าจอ (Ctrl+C เพื่อหยุด)
   rec [ชื่อ] [นาที]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
@@ -138,6 +142,17 @@ telegram() {
         echo "โหมดอัตโนมัติจะแจ้งเตือนเข้า Telegram แล้ว"
 }
 
+# build a page from saved files (no adapter needed) and say where it is
+page() {
+    local kind=$1 out=$2 path=$3 ip
+    cd "$DATA" || return 1
+    PYTHONPATH="$APP" python3 -m deepal_s05 "$kind" --dir "$DATA" \
+        --out "$DATA/$out" >/dev/null || return 1
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    echo "เปิดดูใน Safari: http://${ip:-deepal-pi.local}:8000$path"
+    echo "(หรือไฟล์ $out ในหน้า /files)"
+}
+
 web() {
     local ip
     ip=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -155,6 +170,18 @@ do_command() {
         checkup) run checkup "$@" ;;
         dtc)     run dtc --save "$DATA/dtc_$STAMP.csv" "$@" ;;
         ecus)    run ecus --save "$DATA/ecus_$STAMP.csv" "$@" ;;
+        topo|topology)
+            run ecus --save "$DATA/ecus_$STAMP.csv" &&
+                run dtc --save "$DATA/dtc_$STAMP.csv" &&
+                page topology topology.html /topology ;;
+        freeze)
+            run freeze --save "$DATA/freeze_$STAMP.json" "$@" && {
+                local ip
+                ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+                echo "ดูเป็นตาราง: http://${ip:-deepal-pi.local}:8000/freeze"
+            } ;;
+        dyno)        page dyno dyno.html /dyno ;;
+        chargecurve) page chargecurve charge_curve.html /charge ;;
         scan)
             if [ $# -lt 1 ]; then
                 echo "ใส่ header ด้วย เช่น obd scan 7A7 หรือ obd scan 7A7 0100-01FF"
@@ -303,6 +330,8 @@ menu() {
     local items=("check  อ่านค่าทั้งหมด" "health  ตรวจสุขภาพแบต"
                  "ir  วัด IR (ให้คนอื่นขับ)" "checkup  ตรวจรถรายสัปดาห์"
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
+                 "topo  แผนผัง ECU ทั้งคัน" "freeze  ภาพนิ่งตอนเกิดโค้ด"
+                 "dyno  ไดโน + แผนที่ประสิทธิภาพ" "chargecurve  กราฟการชาร์จ"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
                  "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"

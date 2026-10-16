@@ -116,7 +116,10 @@ def files_page(data_dir):
             'content="width=device-width, initial-scale=1"><title>Deepal S05 '
             'Files</title><body style="font-family:sans-serif;padding:16px">'
             '<h1>ไฟล์ข้อมูล</h1><p><a href="/">กลับหน้าหลัก</a> · '
-            '<a href="/trends">กราฟแนวโน้ม</a></p><ul>%s</ul></body>'
+            '<a href="/trends">กราฟแนวโน้ม</a> · '
+            '<a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · '
+            '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a>'
+            '</p><ul>%s</ul></body>'
             % (rows or "<li>ยังไม่มีไฟล์</li>"))
 
 
@@ -131,8 +134,18 @@ def read_cell_ir(path):
         return {}
 
 
+# scanner-style pages built on request from the files in data_dir
+VISUAL_PAGES = {
+    "/topology": lambda v, d, car: v.topology_html(v.load_topology(d), car),
+    "/dyno": lambda v, d, car: v.dyno_html(v.drive_files(d)),
+    "/charge": lambda v, d, car: v.charge_curve_html(v.charge_files(d)),
+    "/freeze": lambda v, d, car: v.freeze_html(
+        (v.freeze_files(d) or [None])[-1]),
+}
+
+
 def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
-                car_name="Deepal S05", ir_path=None):
+                car_name="Deepal S05", ir_path=None, car_key="deepal-s05"):
     """`poller` only needs a json() method. With `data_dir`, /files lists
     and serves the data files and /trends draws the trend charts. /ir
     serves the per-cell IR file at `ir_path` (default: in data_dir)."""
@@ -173,10 +186,21 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                     return
                 with open(os.path.join(data_dir, name), "rb") as f:
                     body = f.read()
+                if name.endswith(".html"):  # open saved pages in place
+                    self.send_body(body, "text/html; charset=utf-8")
+                    return
                 self.send_body(body, "application/octet-stream", [
                     ("Content-Disposition",
                      "attachment; filename*=UTF-8''%s"
                      % urllib.parse.quote(name))])
+            elif data_dir and path in VISUAL_PAGES:
+                from . import visual
+                try:
+                    body = VISUAL_PAGES[path](visual, data_dir, car_key)
+                except (OSError, ValueError) as e:
+                    body = visual.page("อ่านไฟล์ไม่ได้", html.escape(str(e)))
+                self.send_body(body.encode("utf-8"),
+                               "text/html; charset=utf-8")
             elif data_dir and path == "/trends":
                 from . import report
                 out = os.path.join(data_dir, "trends.html")
@@ -295,7 +319,7 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
 <header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
-<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a></nav></header>
+<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a></nav></header>
 <div class="alerts" id="alerts"></div>
 <div class="summary" id="summary"></div>
 <nav class="tabs" role="tablist" aria-label="รายละเอียด">

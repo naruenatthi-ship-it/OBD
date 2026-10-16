@@ -633,6 +633,119 @@ def cmd_dtc(args):
     return 0
 
 
+def read_freeze_frames(elm, header, codes, signals, capacity):
+    """Freeze frames (19 04) for each code of one ECU: a list of dicts
+    ready for JSON. DID lengths come from reading the same DID live (22),
+    the only way to split the snapshot when the ECU is unknown."""
+    by_did = {s.did: s for s in signals
+              if s.header.upper() == header.upper()}
+    lengths = {}
+
+    def length_of(did):
+        if did not in lengths:
+            try:
+                lengths[did] = len(elm.read_did(header, did))
+            except (NoData, NegativeResponse):
+                sig = by_did.get(did)
+                lengths[did] = sig.min_len if sig else None
+        return lengths[did]
+
+    out = []
+    for code in codes:
+        item = {"header": header, "code": code, "records": []}
+        try:
+            msg = elm.read_snapshot(header, dtc.code_bytes(code))
+        except NegativeResponse as e:
+            item["error"] = str(e)
+            out.append(item)
+            continue
+        except NoData as e:
+            item["error"] = "ไม่ตอบ (%s)" % e
+            out.append(item)
+            continue
+        snap = dtc.parse_snapshot(msg, length_of)
+        item["status"] = "0x%02X" % snap["status"]
+        for rec in snap["records"]:
+            values = []
+            for did, data in rec["values"]:
+                v = {"did": "%04X" % did, "raw": data.hex().upper()}
+                if did in PRIVATE_DIDS:
+                    v["raw"] = "(ซ่อน)"
+                sig = by_did.get(did)
+                if sig and did not in PRIVATE_DIDS:
+                    v.update(key=sig.key, label=sig.label, unit=sig.unit,
+                             value=sig.value(data, capacity))
+                values.append(v)
+            item["records"].append({"record": rec["record"],
+                                    "values": values})
+        if snap["unparsed"]:
+            item["unparsed"] = snap["unparsed"].hex().upper()
+        out.append(item)
+    return out
+
+
+def print_freeze(item):
+    print("\n== %s  %s ==" % (item["header"], item["code"]))
+    if "error" in item:
+        reason = item["error"]
+        if "0x31" in reason:
+            reason = "ไม่มีภาพนิ่งเก็บไว้ (%s)" % reason
+        elif "0x11" in reason or "0x12" in reason:
+            reason = "กล่องนี้ไม่รองรับการอ่านภาพนิ่ง (%s)" % reason
+        print("   " + reason)
+        return
+    if not item["records"] and not item.get("unparsed"):
+        print("   ไม่มีภาพนิ่งเก็บไว้กับโค้ดนี้")
+    for rec in item["records"]:
+        print("   ภาพนิ่งชุดที่ %d (%d ค่า)" % (rec["record"],
+                                           len(rec["values"])))
+        for v in rec["values"]:
+            if v.get("label"):
+                print("     %-28s %10s %-4s  [%s %s]" % (
+                    v["label"], fmt(v["value"]), v["unit"], v["did"],
+                    v["raw"]))
+            else:
+                print("     DID %s  %s" % (v["did"], v["raw"]))
+    if item.get("unparsed"):
+        print("   ข้อมูลที่แยกไม่ได้: %s" % item["unparsed"])
+
+
+def cmd_freeze(args):
+    headers = header_list(args)
+    results = []
+    with connect(args) as elm:
+        print("\nอ่านโค้ดและภาพนิ่งตอนเกิดโค้ด (freeze frame) จาก %d header"
+              " (อ่านอย่างเดียว ไม่ลบโค้ด) กด Ctrl+C เพื่อหยุด\n"
+              % len(headers))
+        try:
+            _, found = scan_dtcs(elm, headers, show_all=True, quiet=True)
+            if args.code:
+                wanted = {c.strip().upper() for c in args.code.split(",")}
+                found = [r for r in found if r["code"] in wanted or
+                         r["code"][:5] in wanted]
+            by_header = {}
+            for r in found:
+                by_header.setdefault(r["header"], []).append(r["code"])
+            for header, codes in by_header.items():
+                for item in read_freeze_frames(elm, header, codes,
+                                               args.vehicle.signals +
+                                               args.custom, args.capacity):
+                    results.append(item)
+                    print_freeze(item)
+        except KeyboardInterrupt:
+            print("\nหยุดแล้ว")
+    if not results:
+        print("ไม่พบโค้ดปัญหา จึงไม่มีภาพนิ่งให้อ่าน")
+    print("\nค่าที่มีชื่อถอดตามสูตรของโปรแกรม (หลายตัวยังรอยืนยัน)"
+          " ส่วน DID ที่ไม่มีชื่อแสดงเป็นค่าดิบ")
+    if args.save:
+        with open(args.save, "w", encoding="utf-8") as f:
+            json.dump({"time": now_text(), "frames": results}, f,
+                      ensure_ascii=False, indent=1)
+        print("บันทึกไว้ที่ %s" % args.save)
+    return 0
+
+
 CHECKUP_FIELDS = ["time", "level", "zone", "soc", "soh", "delta_mv",
                   "batt_temp_max", "batt_temp_min", "temp_delta_c",
                   "aux_12v", "charge_temp", "insulation_ohm_per_v",
@@ -1019,7 +1132,8 @@ def cmd_autopilot(args):
         info=identity.pack_info(args.vehicle, args.capacity,
                                 abnormal_mv=args.abnormal_mv))
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
-                                   data_dir, car_name=args.vehicle.name)
+                                   data_dir, car_name=args.vehicle.name,
+                                   car_key=args.car)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("autopilot: เก็บข้อมูลที่ %s  หน้าจอ http://<IP>:%d" % (
         data_dir, args.http_port))
@@ -1359,6 +1473,22 @@ def cmd_trip(args):
             w.writeheader()
             w.writerows(trips)
         print("บันทึกไว้ที่ %s" % args.save)
+    return 0
+
+
+def cmd_visual(args):
+    """topology / dyno / chargecurve / freezepage: pages from saved files."""
+    from . import visual
+    folder = args.dir
+    if args.kind == "topology":
+        visual.write_topology(folder, args.out, args.car)
+    elif args.kind == "dyno":
+        files = args.files or visual.drive_files(folder)
+        visual.write_dyno(files, args.out)
+    elif args.kind == "chargecurve":
+        files = args.files or visual.charge_files(folder)
+        visual.write_charge_curve(files, args.out)
+    print("สร้างหน้า %s แล้ว เปิดในเบราว์เซอร์ได้เลย" % args.out)
     return 0
 
 
@@ -1714,6 +1844,16 @@ def build_parser():
                    help="ไฟล์เก็บผลสแกนไว้เทียบครั้งต่อไป (ใส่ \"\" เพื่อไม่เก็บ)")
     t.set_defaults(func=cmd_dtc)
 
+    fz = sub.add_parser("freeze",
+                        help="อ่านภาพนิ่งตอนเกิดโค้ด (freeze frame, 19 04)"
+                             " ว่ารถทำอะไรอยู่ตอนตั้งโค้ด")
+    fz.add_argument("--headers", help="ระบุ header เอง เช่น 7A1,7A4")
+    fz.add_argument("--start")
+    fz.add_argument("--end")
+    fz.add_argument("--code", help="เฉพาะโค้ดนี้ เช่น P1B27-05 หรือ P1B27")
+    fz.add_argument("--save", help="บันทึกผลเป็นไฟล์ JSON")
+    fz.set_defaults(func=cmd_freeze)
+
     k = sub.add_parser("checkup",
                        help="ตรวจรถรายสัปดาห์ เทียบกับครั้งก่อน (ทำตอนรถ READY จอดอยู่)")
     k.add_argument("--samples", type=int, default=3)
@@ -1800,6 +1940,20 @@ def build_parser():
                         " (ค่าเริ่มต้น cell_ir.json)")
     w.set_defaults(func=cmd_dashboard)
 
+    for kind, out, help_text in (
+            ("topology", "topology.html",
+             "แผนผังกล่อง ECU ทั้งคัน ระบายสีตามโค้ดปัญหา (จากไฟล์ ecus_/dtc_)"),
+            ("dyno", "dyno.html",
+             "ไดโนจำลอง + แผนที่ประสิทธิภาพมอเตอร์ (จากไฟล์ rec_/drive_)"),
+            ("chargecurve", "charge_curve.html",
+             "กราฟการชาร์จเทียบ SOC (จากไฟล์ charge_)")):
+        vp = sub.add_parser(kind, help=help_text)
+        vp.add_argument("files", nargs="*",
+                        help="ไฟล์ CSV (ค่าเริ่มต้น: ทุกไฟล์ในโฟลเดอร์)")
+        vp.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+        vp.add_argument("--out", default=out)
+        vp.set_defaults(func=cmd_visual, kind=kind)
+
     nt = sub.add_parser("notify-test",
                         help="ส่งข้อความทดสอบไป ntfy/Telegram"
                              " (และบอกเลข chat ของ Telegram)")
@@ -1823,7 +1977,8 @@ def main(argv=None):
     if threading_main():
         signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
-               cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test)
+               cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
+               cmd_visual)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

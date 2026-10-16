@@ -1,4 +1,5 @@
-"""Diagnostic trouble codes read with UDS ReadDTCInformation (19 02)."""
+"""Diagnostic trouble codes read with UDS ReadDTCInformation (19 02) and
+the freeze frames stored with them (19 04)."""
 
 import json
 
@@ -44,6 +45,46 @@ def format_dtc(b1, b2, b3=None):
     code = "%s%d%X%X%X" % ("PCBU"[b1 >> 6], (b1 >> 4) & 3, b1 & 0x0F,
                            b2 >> 4, b2 & 0x0F)
     return code if b3 is None else "%s-%02X" % (code, b3)
+
+
+def code_bytes(code):
+    """'P1B27-05' -> b'\x1b\x27\x05' (inverse of format_dtc)."""
+    base, _, ftb = code.partition("-")
+    b1 = ("PCBU".index(base[0]) << 6) | (int(base[1]) << 4) | int(base[2], 16)
+    return bytes([b1, int(base[3:5], 16), int(ftb or "00", 16)])
+
+
+def parse_snapshot(msg, length_of):
+    """59 04 DTC(3) status, then per record: record number, number of
+    identifiers, (DID hi, DID lo, data)*. The data length of each DID is
+    not in the message, so `length_of(did)` must give it (or None). Bytes
+    that cannot be split go to "unparsed".
+    -> {"code", "status", "records": [{"record", "values": [(did, data)]}],
+        "unparsed": bytes}"""
+    if len(msg) < 6 or msg[0] != 0x59 or msg[1] != 0x04:
+        raise ValueError("not a 59 04 response: %s" % msg.hex())
+    out = {"code": format_dtc(*msg[2:5]), "status": msg[5], "records": [],
+           "unparsed": b""}
+    body, i = msg[6:], 0
+    while i < len(body):
+        if i + 2 > len(body):
+            out["unparsed"] = body[i:]
+            break
+        rec = {"record": body[i], "values": []}
+        count = body[i + 1]
+        out["records"].append(rec)
+        i += 2
+        for _ in range(count):
+            if i + 2 > len(body):
+                break
+            did = body[i] << 8 | body[i + 1]
+            n = length_of(did)
+            if n is None or i + 2 + n > len(body):
+                out["unparsed"] = body[i:]
+                return out
+            rec["values"].append((did, body[i + 2:i + 2 + n]))
+            i += 2 + n
+    return out
 
 
 def is_generic(code):
