@@ -67,6 +67,9 @@ def last_checkup_time(path):
     return None
 
 
+SURVEY_STILL_S = 120.0
+
+
 class Autopilot:
     def __init__(self, open_elm, signals, arrays, data_dir,
                  capacity=pids.DEFAULT_CAPACITY_KWH, rules=None,
@@ -103,6 +106,7 @@ class Autopilot:
         self.drive_log_day = None
         os.makedirs(data_dir, exist_ok=True)
         self.survey = survey.Survey(data_dir, private, clock)
+        self.still_since = None
 
     # -- helpers ---------------------------------------------------------
     def path(self, name):
@@ -219,10 +223,19 @@ class Autopilot:
                 self.baselines = alerts.load_baselines(
                     self.path("checkup_history.csv"))
             return 1.0
-        # the DID survey uses the time between rounds, standing still only
-        still = abs(values.get("motor_rpm") or 0) < 50 and \
-            (values.get("speed_kmh") or 0) < 1
-        if still and self.survey.active():
+        # the DID survey uses the time between rounds, only while parked:
+        # the motor must be read and stopped (an unread motor is not "0")
+        # for SURVEY_STILL_S, so a stop at a red light does not count;
+        # charging counts at once
+        rpm = values.get("motor_rpm")
+        if rpm is None or abs(rpm) >= 50:
+            self.still_since = None
+        elif self.still_since is None:
+            self.still_since = now
+        charging = (values.get("pack_current") or 0) < -2
+        parked = self.still_since is not None and (
+            charging or now - self.still_since >= SURVEY_STILL_S)
+        if parked and self.survey.active():
             try:
                 self.survey.run(self.elm, self.interval - 1)
             except (ElmError, OSError) as e:  # the adapter, not one DID
@@ -249,6 +262,7 @@ class Autopilot:
             traceback.print_exc()
 
     def asleep_round(self, now, v12):
+        self.still_since = None
         if self.awake_since is not None:
             self.awake_since = None
             self.close_drive_log()

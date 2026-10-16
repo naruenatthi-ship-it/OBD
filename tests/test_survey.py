@@ -107,6 +107,18 @@ def test_autopilot_surveys_only_standing_still(tmp_path, monkeypatch):
     driving, elm2 = make_pilot(tmp_path / "d", monkeypatch, [13.9], {
         "soc": 80, "pack_current": 60.0, "motor_rpm": 4000})
     assert driving.step() == driving.interval and elm2.asked == []
+    unread, elm3 = make_pilot(tmp_path / "u", monkeypatch, [13.9], {
+        "soc": 80, "pack_current": -16.0})     # motor did not answer
+    assert unread.step() == unread.interval and elm3.asked == []
+
+
+def test_autopilot_waits_two_minutes_when_not_charging(tmp_path,
+                                                      monkeypatch):
+    pilot, elm = make_pilot(tmp_path, monkeypatch, [13.9], {
+        "soc": 80, "pack_current": 3.0, "motor_rpm": 0})  # red light?
+    assert pilot.step() == pilot.interval and elm.asked == []
+    pilot.clock.t += autopilot.SURVEY_STILL_S
+    assert pilot.step() == 0.5 and elm.asked
 
 
 def test_stop_waits_for_the_car_to_sleep(tmp_path, monkeypatch):
@@ -114,6 +126,7 @@ def test_stop_waits_for_the_car_to_sleep(tmp_path, monkeypatch):
         "soc": 80, "pack_current": 0.0, "motor_rpm": 0})
     monkeypatch.setattr(autopilot, "boot_time", lambda: 0.0)
     pilot.survey.set(pause_until_wake=1_800_000_000.0 + 10_000)
+    pilot.still_since = 0.0                # parked for long already
     pilot.step()                           # service restarted, car on
     assert elm.asked == []
     elm.volts = [12.4]
@@ -121,5 +134,7 @@ def test_stop_waits_for_the_car_to_sleep(tmp_path, monkeypatch):
     assert json.load(open(tmp_path / survey.STATE_FILE))[
         "pause_until_wake"] is False
     elm.volts = [13.9]
+    pilot.step()
+    pilot.clock.t += autopilot.SURVEY_STILL_S
     pilot.step()
     assert elm.asked                       # started again: carries on
