@@ -407,3 +407,75 @@ def compare_drivetests(cur, prev):
             out.append((level, "%s ร้อนขึ้นระหว่างทดสอบมากกว่าครั้งก่อน"
                         " (+%.0f -> +%.0f °C)" % (name, p[key], c[key])))
     return out
+
+
+def _num(text):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
+    """Split drive-log rows (dicts from drive_*.csv) into trips at gaps of
+    more than `gap_s` seconds and total distance, energy and peaks.
+    Energy is battery-side (V x I, positive = discharge), so it includes
+    the air conditioning; regen is the energy that went back in."""
+    import datetime
+    trips, cur, prev = [], None, None
+    for row in rows:
+        try:
+            t = datetime.datetime.fromisoformat(row["time"]).timestamp()
+        except (KeyError, ValueError):
+            continue
+        speed = _num(row.get("speed_kmh"))
+        rpm = _num(row.get("motor_rpm"))
+        if rpm is None and row.get("did_7A7_FD07"):  # raw, from record
+            rpm = int(row["did_7A7_FD07"], 16) - 20000
+        if speed is None and rpm is not None:
+            from .pids import RPM_PER_KMH
+            speed = abs(rpm) / RPM_PER_KMH
+        power = _num(row.get("pack_power_kw"))
+        if power is None and _num(row.get("pack_current")) is not None \
+                and _num(row.get("pack_voltage")) is not None:
+            power = _num(row["pack_current"]) * _num(row["pack_voltage"]) / 1000
+        if speed is None or power is None:
+            continue
+        sample = {"t": t, "time": row["time"], "speed": speed, "power": power,
+                  "soc": _num(row.get("soc")),
+                  "motor": _num(row.get("motor_temp")),
+                  "inverter": _num(row.get("inverter_temp")),
+                  "batt": _num(row.get("batt_temp_max"))}
+        if cur is None or t - prev["t"] > gap_s:
+            cur = {"start": row["time"], "samples": []}
+            trips.append(cur)
+        elif prev is not None:
+            dt = min(t - prev["t"], max_step_s)
+            v = (speed + prev["speed"]) / 2
+            p = (power + prev["power"]) / 2
+            cur["km"] = cur.get("km", 0) + v * dt / 3600
+            cur["kwh"] = cur.get("kwh", 0) + p * dt / 3600
+            if p < 0:
+                cur["regen"] = cur.get("regen", 0) - p * dt / 3600
+        cur["samples"].append(sample)
+        prev = sample
+    out = []
+    for trip in trips:
+        km = trip.get("km", 0)
+        if km < min_km:
+            continue
+        s = trip["samples"]
+
+        def peak(key):
+            vals = [x[key] for x in s if x[key] is not None]
+            return max(vals) if vals else None
+        out.append({
+            "start": trip["start"], "end": s[-1]["time"],
+            "minutes": (s[-1]["t"] - s[0]["t"]) / 60, "km": km,
+            "kwh": trip.get("kwh", 0), "regen_kwh": trip.get("regen", 0),
+            "kwh_100km": trip.get("kwh", 0) / km * 100,
+            "max_kmh": peak("speed"), "max_kw": peak("power"),
+            "soc_start": s[0]["soc"], "soc_end": s[-1]["soc"],
+            "motor_max": peak("motor"), "inverter_max": peak("inverter"),
+            "batt_max": peak("batt")})
+    return out

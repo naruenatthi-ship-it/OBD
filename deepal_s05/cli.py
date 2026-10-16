@@ -1311,6 +1311,44 @@ def cmd_record(args):
     return 0
 
 
+def cmd_trip(args):
+    import glob
+    files = args.files or sorted(glob.glob("drive_*.csv"))
+    rows = []
+    for path in files:
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                rows.extend(csv.DictReader(f))
+        except OSError as e:
+            print("อ่าน %s ไม่ได้: %s" % (path, e))
+    trips = analysis.trip_summaries(rows, gap_s=args.gap * 60)
+    if not trips:
+        print("ไม่พบทริปที่มีความเร็ว (ต้องเป็นไฟล์ที่บันทึกหลังอัปเดตที่อ่านรอบมอเตอร์ได้)")
+        return 1
+    print("%-16s %5s %6s %6s %7s %6s %5s %5s %9s %9s" % (
+        "เริ่ม", "นาที", "km", "kWh", "kWh/100", "regen", "สูงสุด", "kW",
+        "SOC", "มอเตอร์/อินฯ"))
+    for t in trips[-args.last:]:
+        print("%-16s %5.0f %6.1f %6.2f %7.1f %6.2f %5s %5s %9s %9s" % (
+            t["start"].replace("T", " ")[:16], t["minutes"], t["km"],
+            t["kwh"], t["kwh_100km"], t["regen_kwh"],
+            fmt(round(t["max_kmh"])), fmt(round(t["max_kw"])),
+            "%s→%s" % (fmt(t["soc_start"]), fmt(t["soc_end"])),
+            "%s/%s" % (fmt(t["motor_max"]), fmt(t["inverter_max"]))))
+    total_km = sum(t["km"] for t in trips)
+    total_kwh = sum(t["kwh"] for t in trips)
+    print("\nรวม %d ทริป %.1f km ใช้ %.2f kWh เฉลี่ย %.1f kWh/100 km"
+          " (ฝั่งแบต รวมแอร์ · ความเร็วตามมาตรวัด)" % (
+              len(trips), total_km, total_kwh, total_kwh / total_km * 100))
+    if args.save:
+        with open(args.save, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, list(trips[0]))
+            w.writeheader()
+            w.writerows(trips)
+        print("บันทึกไว้ที่ %s" % args.save)
+    return 0
+
+
 def cmd_correlate(args):
     from . import reverse
     rows, did_keys = reverse.read_record(args.file)
@@ -1522,6 +1560,17 @@ def build_parser():
     co.add_argument("--top", type=int, default=15)
     co.set_defaults(func=cmd_correlate)
 
+    tp = sub.add_parser("trip",
+                        help="สรุปทริปจากไฟล์ drive_*.csv: km, kWh/100 km"
+                             " (ไม่ต้องใส่ --port)")
+    tp.add_argument("files", nargs="*",
+                    help="ไฟล์บันทึก (ค่าเริ่มต้น drive_*.csv ในโฟลเดอร์นี้)")
+    tp.add_argument("--gap", type=float, default=5,
+                    help="หยุดนานกี่นาทีถือว่าจบทริป (ค่าเริ่มต้น 5)")
+    tp.add_argument("--last", type=int, default=20)
+    tp.add_argument("--save", help="บันทึกสรุปเป็น CSV")
+    tp.set_defaults(func=cmd_trip)
+
     e = sub.add_parser("ecus", help="สแกนหา ECU ทั้งหมดในรถ (อ่านอย่างเดียว)")
     e.add_argument("--start", help="header แรก (ค่าเริ่มต้น 700 หรือ 00 สำหรับ 29 บิต)")
     e.add_argument("--end", help="header สุดท้าย (ค่าเริ่มต้น 7FF หรือ FF)")
@@ -1702,7 +1751,7 @@ def main(argv=None):
     if threading_main():
         signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
-               cmd_correlate, cmd_fetch_obdb)
+               cmd_correlate, cmd_fetch_obdb, cmd_trip)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

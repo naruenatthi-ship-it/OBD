@@ -142,8 +142,9 @@ def take(elm, signals, arrays=(), capacity=pids.DEFAULT_CAPACITY_KWH,
 
 
 class CsvLog:
-    """Append snapshots to a CSV file; columns are fixed by the file's
-    existing header or by the first snapshot."""
+    """Append snapshots to a CSV file. A value that the file has no column
+    for yet (a newer program version, or cells read for the first time)
+    adds the column by rewriting the file once."""
 
     def __init__(self, path, label=""):
         self.path = path
@@ -173,8 +174,24 @@ class CsvLog:
                 row["%s_%d" % (key, i)] = round(value, 4)
         if self.writer is None:
             self._open(list(row))
+        missing = [k for k in row if k not in self.writer.fieldnames]
+        if missing:
+            self._add_columns(missing)
         self.writer.writerow(row)
         self.file.flush()
+
+    def _add_columns(self, missing):
+        self.file.close()
+        with open(self.path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        fields = list(self.writer.fieldnames) + missing
+        with open(self.path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fields, restval="")
+            w.writeheader()
+            w.writerows(rows)
+        self.file = open(self.path, "a", newline="", encoding="utf-8")
+        self.writer = csv.DictWriter(self.file, fields, restval="",
+                                     extrasaction="ignore")
 
     def _open(self, fields):
         header = None
@@ -185,6 +202,6 @@ class CsvLog:
             pass
         self.file = open(self.path, "a", newline="", encoding="utf-8")
         self.writer = csv.DictWriter(self.file, header or fields,
-                                     extrasaction="ignore")
+                                     restval="", extrasaction="ignore")
         if not header:
             self.writer.writeheader()

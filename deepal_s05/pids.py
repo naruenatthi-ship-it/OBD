@@ -124,6 +124,10 @@ TEMP_SIGNALS = [
 # (motor), FD1E jumped with current (inverter); their A-40 offset is the
 # BMS convention and not yet confirmed.
 MOTOR_HEADER = "7A7"
+# Motor rpm per km/h shown on the speedometer: 6470 rpm at an 80 km/h
+# cruise (28 steady samples, 2026-10-16), about a 10.9:1 reduction on
+# 19-inch wheels. GPS speed is usually a few percent lower.
+RPM_PER_KMH = 80.9
 MOTOR_SIGNALS = [
     Signal("motor_temp", "อุณหภูมิมอเตอร์", 0xFD0A, "C", 1, CANDIDATE,
            lambda d, c: d[0] - 40, "สูตร A-40 ยังรอยืนยัน",
@@ -158,6 +162,9 @@ def derived(values):
     hi, lo = values.get("batt_temp_max"), values.get("batt_temp_min")
     if hi is not None and lo is not None:
         out["temp_delta_c"] = hi - lo
+    rpm = values.get("motor_rpm")
+    if isinstance(rpm, (int, float)):
+        out["speed_kmh"] = abs(rpm) / RPM_PER_KMH
     # insulation resistance per volt of pack voltage, the unit safety
     # standards use (ISO 6469-3: at least 100 ohm/V on the DC side)
     r = values.get("insulation_kohm")

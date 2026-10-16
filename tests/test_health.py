@@ -94,3 +94,41 @@ def test_group_cache_reads_cells_every_period():
     now[0] = 31
     snapshot.take(elm, sigs, v.groups, slow=cache)
     assert len(elm.reads) == 243
+
+
+def test_csvlog_adds_new_columns(tmp_path):
+    import csv
+    from deepal_s05 import snapshot
+    path = tmp_path / "drive.csv"
+    with snapshot.CsvLog(str(path), "drive") as log:
+        log.write(snapshot.Snapshot(1.0, {"soc": 80}))
+    with snapshot.CsvLog(str(path), "drive") as log:  # next program run
+        log.write(snapshot.Snapshot(2.0, {"soc": 79, "motor_temp": 50}))
+        log.write(snapshot.Snapshot(3.0, {"soc": 78}))
+    rows = list(csv.DictReader(open(path)))
+    assert [r["soc"] for r in rows] == ["80", "79", "78"]
+    assert [r["motor_temp"] for r in rows] == ["", "50", ""]
+
+
+def test_trip_summaries():
+    from deepal_s05 import analysis, pids
+    rows = []
+    # 10 minutes at 80 km/h drawing 10 kW, sampled every 6 s, then a stop
+    # of 20 minutes and a second 3-minute trip with 2 kW of regen
+    for i in range(101):
+        rows.append({"time": "2026-10-16T12:%02d:%02d" % (i * 6 // 60,
+                                                         i * 6 % 60),
+                     "motor_rpm": str(80 * pids.RPM_PER_KMH),
+                     "pack_power_kw": "10", "soc": str(90 - i // 50),
+                     "motor_temp": str(50 + i // 10)})
+    for i in range(31):
+        rows.append({"time": "2026-10-16T12:%02d:%02d" % (30 + i * 6 // 60,
+                                                         i * 6 % 60),
+                     "speed_kmh": "36", "pack_power_kw": "-2"})
+    a, b = analysis.trip_summaries(rows)
+    assert abs(a["km"] - 80 * 10 / 60) < 0.01
+    assert abs(a["kwh"] - 10 * 10 / 60) < 0.01
+    assert abs(a["kwh_100km"] - 12.5) < 0.01
+    assert a["motor_max"] == 60 and a["soc_start"] == 90
+    assert abs(b["km"] - 36 * 3 / 60) < 0.01 and b["regen_kwh"] > 0.09
+    assert pids.derived({"motor_rpm": -809})["speed_kmh"] == 10

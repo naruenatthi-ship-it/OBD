@@ -22,6 +22,7 @@ LABELS = {
     "batt_temp_min": ("แบตเย็นสุด", "°C"), "soh": ("SOH", "%"),
     "aux_12v": ("แบต 12V", "V"),
     "insulation_ohm_per_v": ("ฉนวน", "Ω/V"),
+    "speed_kmh": ("ความเร็ว", "km/h"),
 }
 
 
@@ -379,7 +380,7 @@ function render(d) {
   if ('soh' in v) html += stat('SOH', f(v.soh,1), '%');
   html += stat('แบต 12V', f(v.aux_12v,2), 'V');
   if (v.motor_temp !== undefined) html += stat('มอเตอร์', f(v.motor_temp,0), '°C', 'อินเวอร์เตอร์ '+f(v.inverter_temp,0)+' °C', v.motor_temp > 110 || v.inverter_temp > 85);
-  if (v.motor_rpm !== undefined) html += stat('รอบมอเตอร์', f(v.motor_rpm,0), 'rpm', 'แรงบิด '+f(v.motor_torque,0)+' Nm');
+  if (v.motor_rpm !== undefined) html += stat('ความเร็ว', f(v.speed_kmh,0), 'km/h', f(v.motor_rpm,0)+' rpm · '+f(v.motor_torque,0)+' Nm');
   if (v.insulation_ohm_per_v !== undefined) html += stat('ฉนวน', f(v.insulation_ohm_per_v,0), 'Ω/V', f(v.insulation_kohm,0)+' kΩ', v.insulation_ohm_per_v < 500);
   (d.custom||[]).forEach(function(k){ if (k==='insulation_kohm') return; var l = d.labels[k]||[k,'']; html += stat(esc(l[0]), f(v[k],1), esc(l[1]), d.errors[k] ? 'ไม่ตอบ' : ''); });
   document.getElementById('summary').innerHTML = html;

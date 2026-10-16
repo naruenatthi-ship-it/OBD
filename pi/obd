@@ -31,6 +31,7 @@ usage() {
   rec [ชื่อ] [นาที]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
                    เช่น obd rec drive 20 (ปิด Termius/ล็อกจอขับได้เลย)
   stop             หยุด obd rec ก่อนเวลา
+  trip             สรุปทริป: ระยะทาง kWh ที่ใช้ kWh/100 km ความเร็ว/ความร้อนสูงสุด
   pair             จับคู่กล่อง OBD ใหม่
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
   web              บอกที่อยู่หน้า dashboard
@@ -100,6 +101,7 @@ do_command() {
             run discover --header "$header" --ranges "$ranges" \
                 --save "$DATA/scan_${header//,/_}_$STAMP.csv" "$@" ;;
         live)    run live "$@" ;;
+        trip)    cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 trip "$@" ;;
         rec)
             local name=${1:-drive} minutes=${2:-20} scan
             scan=$(ls -t "$DATA"/scan_*.csv 2>/dev/null | head -1)
@@ -152,6 +154,7 @@ menu() {
                  "ir  วัด IR (ให้คนอื่นขับ)" "checkup  ตรวจรถรายสัปดาห์"
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
+                 "trip  สรุปทริป (km, kWh/100 km)"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
                  "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"
