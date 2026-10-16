@@ -15,6 +15,7 @@ import time
 
 # 11-bit ids in blocks of 32 (filter xx0/xx0, mask 7E0)
 BLOCK = 0x20
+MAX_SAMPLES = 16
 
 
 def blocks(lo=0x000, hi=0x7FF, size=BLOCK):
@@ -54,8 +55,13 @@ class Collector:
         if s is None:
             s = self.ids[can_id] = {"count": 0, "first_t": t, "last_t": t,
                                     "sample": data, "lo": list(data),
-                                    "hi": list(data), "len": len(data)}
+                                    "hi": list(data), "len": len(data),
+                                    "seen": []}
         s["count"] += 1
+        # different payloads, for ids that multiplex several values
+        # behind a selector byte (the odometer may only be in one of them)
+        if data not in s["seen"] and len(s["seen"]) < MAX_SAMPLES:
+            s["seen"].append(data)
         s["last_t"] = t
         for k, b in enumerate(data[:len(s["lo"])]):
             s["lo"][k] = min(s["lo"][k], b)
@@ -73,11 +79,13 @@ class Collector:
                 "len": s["len"], "sample": s["sample"].hex(" ").upper(),
                 "moving_bytes": " ".join(str(k) for k in moving),
                 "min": " ".join("%02X" % b for b in s["lo"]),
-                "max": " ".join("%02X" % b for b in s["hi"])})
+                "max": " ".join("%02X" % b for b in s["hi"]),
+                "samples": "|".join(d.hex().upper() for d in s["seen"])})
         return out
 
 
-FIELDS = ["id", "count", "hz", "len", "sample", "moving_bytes", "min", "max"]
+FIELDS = ["id", "count", "hz", "len", "sample", "moving_bytes", "min", "max",
+          "samples"]
 
 
 def scan(elm, seconds=2.0, lo=0x000, hi=0x7FF, progress=None):
@@ -137,14 +145,25 @@ def find_value(rows, target, tolerance):
     `target`. -> [(id, first byte, length, order, scale, value)]"""
     hits = []
     for r in rows.values() if isinstance(rows, dict) else rows:
-        data = bytes.fromhex(r["sample"].replace(" ", ""))
-        for n in (2, 3, 4):
-            for k in range(len(data) - n + 1):
-                chunk = data[k:k + n]
-                for order in ("big", "little"):
-                    raw = int.from_bytes(chunk, order)
-                    for scale in (1, 10, 100):
-                        value = raw / scale
-                        if abs(value - target) <= tolerance:
-                            hits.append((r["id"], k, n, order, scale, value))
+        payloads = (r.get("samples") or r["sample"].replace(" ", "")).split("|")
+        found = set()
+        for p in payloads:
+            data = bytes.fromhex(p)
+            for hit in _windows(r["id"], data, target, tolerance):
+                if hit not in found:
+                    found.add(hit)
+                    hits.append(hit)
+    return hits
+
+
+def _windows(can_id, data, target, tolerance):
+    hits = []
+    for n in (2, 3, 4):
+        for k in range(len(data) - n + 1):
+            for order in ("big", "little"):
+                raw = int.from_bytes(data[k:k + n], order)
+                for scale in (1, 10, 100):
+                    value = raw / scale
+                    if abs(value - target) <= tolerance:
+                        hits.append((can_id, k, n, order, scale, value))
     return hits

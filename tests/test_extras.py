@@ -177,3 +177,14 @@ def test_canfind_odometer():
     hits = canscan.find_value(rows, 42795, 1)
     assert ("3F0", 1, 3, "big", 10, 42795.3) in hits
     assert all(h[0] == "3F0" for h in hits)
+
+
+def test_canfind_searches_every_multiplexed_payload():
+    col = canscan.Collector()
+    col.add(0, 0x5A0, bytes.fromhex("0100000000000000"))  # mux 1
+    col.add(1, 0x5A0, bytes.fromhex("020687B100000000"))  # mux 2: odometer
+    col.add(2, 0x5A0, bytes.fromhex("0100000000000000"))
+    (row,) = col.rows({0x5A0: 2})
+    assert row["samples"].count("|") == 1
+    assert ("5A0", 1, 3, "big", 10, 42795.3) in canscan.find_value(
+        [row], 42795, 1)
