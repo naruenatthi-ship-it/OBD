@@ -28,6 +28,9 @@ usage() {
   ecus             หากล่อง ECU ทั้งหมด (บันทึก ecus_วันเวลา.csv)
   scan HEADER [ช่วง]  สแกน DID เช่น obd scan 7A7 0100-01FF (ค่าเริ่มต้น F100-F3FF)
   live             ดูค่าสดในหน้าจอ (Ctrl+C เพื่อหยุด)
+  rec [ชื่อ] [นาที]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
+                   เช่น obd rec drive 20 (ปิด Termius/ล็อกจอขับได้เลย)
+  stop             หยุด obd rec ก่อนเวลา
   pair             จับคู่กล่อง OBD ใหม่
   status           ดูว่าโหมดอัตโนมัติทำงานไหม + log ล่าสุด
   web              บอกที่อยู่หน้า dashboard
@@ -97,6 +100,34 @@ do_command() {
             run discover --header "$header" --ranges "$ranges" \
                 --save "$DATA/scan_${header//,/_}_$STAMP.csv" "$@" ;;
         live)    run live "$@" ;;
+        rec)
+            local name=${1:-drive} minutes=${2:-20} scan
+            scan=$(ls -t "$DATA"/scan_*.csv 2>/dev/null | head -1)
+            if [ -z "$scan" ]; then
+                echo "ยังไม่มีไฟล์ scan ให้ใช้ สแกนก่อน เช่น obd scan 7A7 F400-FFFF"
+                return 1
+            fi
+            nohup bash "$0" _rec "$name" "$minutes" "$scan" \
+                > "$DATA/rec_$name.log" 2>&1 &
+            echo "เริ่มบันทึก '$name' $minutes นาที (DID จาก $(basename "$scan"))"
+            echo "ทำงานเบื้องหลัง ปิด Termius หรือล็อกจอได้เลย"
+            echo "ไฟล์: rec_${name}_$STAMP.csv  หยุดก่อนเวลา: obd stop" ;;
+        _rec)
+            echo $$ > "$DATA/.rec.pid"
+            run record --dids-from "$3" --note "$1" \
+                --duration "$(( ${2:-20} * 60 ))" \
+                --csv "$DATA/rec_${1}_$STAMP.csv" ;;
+        stop)
+            # the recorder runs as a child of the obd _rec job; background
+            # jobs ignore SIGINT, so TERM (the program treats it as Ctrl+C)
+            local pid
+            pid=$(cat "$DATA/.rec.pid" 2>/dev/null)
+            if [ -n "$pid" ] && pkill -TERM -P "$pid" 2>/dev/null; then
+                rm -f "$DATA/.rec.pid"
+                echo "หยุดการบันทึกแล้ว (โหมดอัตโนมัติจะเปิดคืนเอง)"
+            else
+                echo "ไม่มีการบันทึกที่กำลังทำงานอยู่"
+            fi ;;
         pair)    bash "$APP/pi/pair.sh" "$@" ;;
         status)
             "$SYSTEMCTL" status deepal-obd --no-pager | head -5
@@ -120,6 +151,7 @@ menu() {
     local items=("check  อ่านค่าทั้งหมด" "health  ตรวจสุขภาพแบต"
                  "ir  วัด IR (ให้คนอื่นขับ)" "checkup  ตรวจรถรายสัปดาห์"
                  "dtc  อ่านโค้ดปัญหา" "ecus  หากล่อง ECU" "live  ดูค่าสด"
+                 "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
                  "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"

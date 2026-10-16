@@ -1687,9 +1687,20 @@ def build_parser():
     return p
 
 
+def threading_main():
+    import threading
+    return threading.current_thread() is threading.main_thread()
+
+
+def _stop_on_term(signum, frame):
+    raise KeyboardInterrupt  # same clean stop as Ctrl+C (files, adapter)
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    if threading_main():
+        signal.signal(signal.SIGTERM, _stop_on_term)
     offline = (cmd_analyze, cmd_report, cmd_trends, cmd_scandiff,
                cmd_correlate, cmd_fetch_obdb)
     if args.func not in offline and not args.port:
