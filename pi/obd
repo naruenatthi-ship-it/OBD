@@ -36,6 +36,8 @@ usage() {
   stop             หยุดงานเบื้องหลัง (obd rec / obd bg)
   bg <คำสั่ง>       สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น obd bg scan 7A4,742 0100-EFFF
   log              ดูความคืบหน้าของงานเบื้องหลังล่าสุด
+  show [คำค้น]      แสดงไฟล์ผลในจอ (ใช้ตอนหน้า /files เปิดไม่ได้) เช่น obd show 7A4
+                   ไม่ใส่คำค้น = ไฟล์ scan ล่าสุด
   wifi             ดู WiFi ที่จำไว้และที่ต่ออยู่
   wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (เปิด Hotspot เมื่อไหร่ Pi ย้ายกลับมาเอง)
   wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
@@ -227,6 +229,25 @@ do_command() {
                 echo "== $(basename "$last") =="
                 tail -n 15 "$last"
             fi ;;
+        show)
+            # the dashboard (and its /files page) is off while a command
+            # holds the adapter, so print results to the terminal instead
+            local files
+            if [ $# -gt 0 ]; then
+                files=$(ls -t "$DATA"/*"$1"*.csv "$DATA"/*"$1"*.json 2>/dev/null)
+            else
+                files=$(ls -t "$DATA"/scan_*.csv 2>/dev/null | head -1)
+            fi
+            if [ -z "$files" ]; then
+                echo "ไม่เจอไฟล์${1:+ ที่มีคำว่า $1}  ดูรายชื่อไฟล์: ls $DATA"
+                return 1
+            fi
+            local f
+            for f in $files; do
+                echo "== $(basename "$f") ($(($(wc -l < "$f") - 1)) แถว) =="
+                cat "$f"
+                echo
+            done ;;
         _rec)
             echo $$ > "$DATA/.rec.pid"
             run record --dids-from "$3" --note "$1" \
