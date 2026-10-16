@@ -4,7 +4,8 @@
 
 ## สถานะตอนนี้
 
-- โค้ดล่าสุดอยู่บน `claude/handoff-docs-continuation-3g6l2n` (ต่อจาก `claude/happy-hawking-6te6q7`, ไม่มี PR) · เทสต์ผ่าน 169 ตัว
+- โค้ดล่าสุดอยู่บน `claude/happy-hawking-6te6q7` และ `claude/handoff-docs-continuation-3g6l2n` (เหมือนกัน, ไม่มี PR)
+  · Pi ดึงจาก happy-hawking · เทสต์ผ่าน 169 ตัว
 - session 2026-10-16 (ต่อ): เพิ่มแจ้งเตือน Telegram (`obd telegram TOKEN`, `--telegram CHAT_ID`,
   คำสั่ง `notify-test`) ยังไม่มีผล scan จากเจ้าของ
 - ฮาร์ดแวร์ใช้งานจริงแล้ว: Pi Zero 2 W ในรถ + vLinker MC+ (BLE) → อ่าน BMS/เซลล์/มอเตอร์ของ Deepal ได้
