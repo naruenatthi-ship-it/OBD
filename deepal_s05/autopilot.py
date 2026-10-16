@@ -14,7 +14,8 @@ import threading
 import time
 import traceback
 
-from . import alerts, dashboard, identity, pids, snapshot, survey
+from . import (alerts, analysis, cost, dashboard, identity, pids, snapshot,
+               survey)
 from .elm327 import ElmError
 
 
@@ -94,6 +95,8 @@ class Autopilot:
         self.shutdown = shutdown
         self.clock = clock
         self.state = State(signals, arrays, info)
+        self.dc = analysis.DcSession(
+            capacity, cost.load_tariff(data_dir)["dc_price"])
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
         self.baselines = baselines or {}  # usual values, from checkups
         self.vehicle = vehicle  # BMS identification is read once when awake
@@ -209,6 +212,7 @@ class Autopilot:
             self.notifier.notify(found)
         self.state.update(time=snap.time, values=values, arrays=snap.arrays,
                           errors=snap.errors, error=None,
+                          dc=self.dc.update(snap.time, values),
                           status="รถตื่น กำลังบันทึก",
                           alerts=[{"level": a.level, "text": a.text()}
                                   for a in found])

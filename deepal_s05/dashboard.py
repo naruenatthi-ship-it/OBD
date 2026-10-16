@@ -9,7 +9,7 @@ import traceback
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import alerts, identity, pids, snapshot
+from . import alerts, analysis, datafiles, identity, pids, snapshot, ui
 from .elm327 import ElmError
 
 LABELS = {
@@ -33,8 +33,9 @@ CELL_IR_FILE = "cell_ir.json"  # written by health --cell-ir
 class Poller(threading.Thread):
     def __init__(self, elm, signals, arrays, capacity, interval,
                  csv_log=None, rules=None, notifier=None, info=None,
-                 vehicle=None, baselines=None):
+                 vehicle=None, baselines=None, dc_price=7.5):
         super().__init__(daemon=True)
+        self.dc = analysis.DcSession(capacity, dc_price)
         self.baselines = baselines or {}
         self.vehicle = vehicle  # to read the BMS identification once
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
@@ -80,7 +81,10 @@ class Poller(threading.Thread):
                 with self.lock:
                     self.data.update(time=snap.time, values=snap.values,
                                      arrays=snap.arrays, errors=snap.errors,
-                                     error=None, alerts=[
+                                     error=None,
+                                     dc=self.dc.update(snap.time,
+                                                       snap.values),
+                                     alerts=[
                                          {"level": a.level, "text": a.text()}
                                          for a in found])
             except (ElmError, OSError) as e:
@@ -96,19 +100,93 @@ class Poller(threading.Thread):
             return json.dumps(self.data, ensure_ascii=False)
 
 
-def list_files(data_dir):
-    """Data files offered for download: (name, size), newest first."""
-    from . import datafiles
-    return [(e["name"], e["size"]) for e in datafiles.entries(data_dir)]
-
-
 KIND_NOTE = {"history": "ประวัติ ห้ามลบ", "page": "หน้ารายงาน",
              "log": "log", "snapshot": "", "data": ""}
+BADGES = ("csv", "json", "log", "html", "txt")
+PREVIEW_BYTES = 200000
+PREVIEW_ROWS = 30
+
+FILES_CSS = """
+.fstats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+  text-align:center; }
+.fstats b { display:block; font-size:1.25rem; font-weight:800;
+  font-variant-numeric:tabular-nums; }
+.fstats small { color:var(--muted); font-size:.78rem; }
+.fstats + p { margin:12px 0 0; text-align:center; }
+.hint { display:flex; gap:12px; align-items:center; }
+textarea { width:100%; max-height:62vh; padding:12px; border-radius:14px;
+  border:1px solid var(--line); background:var(--surface2); color:var(--ink);
+  font:12px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  resize:vertical; }
+#m { font-weight:600; color:var(--ok); } #m:empty { display:none; }
+#m.err { color:var(--bad); }
+.preview th { position:sticky; top:0; background:var(--surface); }
+.preview td, .preview th { white-space:nowrap; font-family:ui-monospace,
+  "SF Mono",Menlo,Consolas,monospace; font-size:.78rem; }
+.preview .table { max-height:65vh; }
+"""
+
+TOOLS = (
+    ("รายงาน", (
+        ("/digest", "list", "สรุปผลสำรวจ", "ข้อความสั้น คัดลอกส่งให้ Claude",
+         "#0a9488"),
+        ("/health", "pulse", "เตือนล่วงหน้า", "สุขภาพรถจากแนวโน้ม", "#d92d20"),
+        ("/cost", "coin", "ค่าไฟชาร์จ", "สรุปรายเดือน บ้าน AC / ตู้ DC",
+         "#ca8a04"),
+        ("/trends", "trend", "กราฟแนวโน้ม", "SOH ส่วนต่างเซลล์ แบต 12V",
+         "#2f6fdb"))),
+    ("เจาะลึก", (
+        ("/charge", "bolt", "กราฟชาร์จ", "กำลัง อุณหภูมิ เซลล์ ตาม SOC",
+         "#e8590c"),
+        ("/dyno", "gauge", "ไดโน", "กำลังและแรงบิดตามความเร็ว", "#8b5cf6"),
+        ("/topology", "ecu", "แผนผัง ECU", "กล่องที่ตอบ และโค้ดปัญหา",
+         "#0e7490"),
+        ("/freeze", "camera", "ภาพนิ่งโค้ด", "ค่าตอนเกิดโค้ดปัญหา", "#64748b"))),
+    ("ข้อมูล", (
+        ("/files", "folder", "ไฟล์ข้อมูล", "ดูและดาวน์โหลดไฟล์ที่บันทึกไว้",
+         "#15803d"),)),
+)
+
+
+def tools_page():
+    parts = []
+    for section, tiles in TOOLS:
+        parts.append('<div class="label">%s</div><div class="tiles">' % section)
+        for href, ic, title, sub, color in tiles:
+            parts.append(
+                '<a class="tile" href="%s"><span class="badge" style="--c:%s;'
+                '--cb:color-mix(in srgb,%s 15%%,transparent)">%s</span>'
+                '<span><b>%s</b><small>%s</small></span></a>'
+                % (href, color, color, ui.icon(ic), title, sub))
+        parts.append("</div>")
+    return ui.shell("เมนู", "".join(parts), back=None, active="tools",
+                    sub="รายงานและเครื่องมือทั้งหมด")
+
+
+def _badge(name):
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return '<span class="badge k-%s">%s</span>' % (
+        ext if ext in BADGES else "log", html.escape(ext.upper()[:4] or "?"))
+
+
+def _file_href(name):
+    """.txt and .html open inside the app; everything else goes to a
+    preview page first (a raw download would leave the phone app with no
+    way back)."""
+    q = urllib.parse.quote(name)
+    return ("/files/" if name.endswith((".txt", ".html")) else "/view/") + q
+
+
+def _day_label(d):
+    import datetime
+    today = datetime.date.today()
+    prefix = {today: "วันนี้ · ", today - datetime.timedelta(days=1):
+              "เมื่อวาน · "}.get(d, "")
+    return prefix + d.strftime("%d/%m/%Y")
 
 
 def files_page(data_dir):
     import shutil
-    from . import datafiles
     items = datafiles.entries(data_dir)
     total = sum(e["size"] for e in items)
     try:
@@ -120,35 +198,101 @@ def files_page(data_dir):
         d = e["time"].date()
         if d != day:
             if day is not None:
-                parts.append("</ul>")
-            parts.append("<h2>%s</h2><ul>" % d.strftime("%d/%m/%Y"))
+                parts.append("</div>")
+            parts.append('<div class="label">%s</div><div class="list">'
+                         % _day_label(d))
             day = d
         note = KIND_NOTE[e["kind"]]
         parts.append(
-            '<li><span class="t">%s</span> <a href="/files/%s">%s</a> '
-            '<small>%s%s</small></li>' % (
-                e["time"].strftime("%H:%M"), urllib.parse.quote(e["name"]),
-                html.escape(e["name"]), datafiles.human_size(e["size"]),
-                " · " + note if note else ""))
+            '<a class="item" href="%s">%s<span class="tx"><b>%s</b>'
+            '<small>%s · %s%s</small></span><span class="go">%s</span></a>' % (
+                _file_href(e["name"]), _badge(e["name"]),
+                html.escape(e["name"]), e["time"].strftime("%H:%M"),
+                datafiles.human_size(e["size"]), " · " + note if note else "",
+                ui.icon("next")))
     if parts:
-        parts.append("</ul>")
-    return ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
-            'content="width=device-width, initial-scale=1"><title>Deepal S05 '
-            'Files</title><style>body{font-family:sans-serif;padding:16px;'
-            'line-height:1.5}h2{font-size:1rem;margin:18px 0 4px}ul{margin:0;'
-            'padding-left:18px}.t{font-family:monospace;color:#667}small{'
-            'color:#667}</style><body>'
-            '<h1>ไฟล์ข้อมูล</h1><p><a href="/">กลับหน้าหลัก</a> · '
-            '<b><a href="/digest">สรุปผลสำรวจ (ส่งให้ Claude)</a></b> · '
-            '<a href="/trends">กราฟแนวโน้ม</a> · '
-            '<a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · '
-            '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · '
-            '<a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></p>'
-            '<p><small>เรียงตามเวลาที่บันทึก ใหม่สุดอยู่บน · %d ไฟล์ รวม %s · '
-            'การ์ดเหลือที่ว่าง %s · ลบไฟล์ที่ไม่จำเป็นด้วยคำสั่ง obd clean'
-            '</small></p>%s</body>'
-            % (len(items), datafiles.human_size(total), free,
-               "".join(parts) or "<p>ยังไม่มีไฟล์</p>"))
+        parts.append("</div>")
+    body = (
+        '<section class="card"><div class="fstats"><div><b>%d</b><small>ไฟล์'
+        '</small></div><div><b>%s</b><small>รวม</small></div><div><b>%s</b>'
+        '<small>การ์ดเหลือ</small></div></div><p class="muted">ใหม่สุดอยู่บน · '
+        'กดไฟล์เพื่อดูก่อนดาวน์โหลด · ลบไฟล์ที่ไม่จำเป็นด้วย <code>obd clean'
+        '</code></p></section>'
+        '<div class="list"><a class="item" href="/digest"><span class="badge" '
+        'style="--c:var(--accent);--cb:var(--accent-soft)">%s</span><span '
+        'class="tx"><b>สรุปผลสำรวจ (ส่งให้ Claude)</b><small>ข้อความสั้น '
+        'กดคัดลอกแล้ววางในแชตได้เลย</small></span><span class="go">%s</span>'
+        '</a></div>%s' % (
+            len(items), datafiles.human_size(total), free, ui.icon("list"),
+            ui.icon("next"), "".join(parts) or ui.empty("ยังไม่มีไฟล์",
+                                                        "folder")))
+    return ui.shell("ไฟล์ข้อมูล", body, back=None, active="files",
+                    sub="%d ไฟล์ · %s" % (len(items),
+                                          datafiles.human_size(total)),
+                    css=FILES_CSS)
+
+
+def _count_lines(path):
+    n = 0
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            n += chunk.count(b"\n")
+    return n
+
+
+def view_page(data_dir, entry):
+    """/view/<name>: a look at a data file inside the app, with the
+    download opening in a new view so the app stays where it was."""
+    import csv
+    name = entry["name"]
+    path = os.path.join(data_dir, name)
+    size = entry["size"]
+    tail = name.endswith(".log")
+    with open(path, "rb") as f:
+        if tail and size > PREVIEW_BYTES:
+            f.seek(size - PREVIEW_BYTES)
+        raw = f.read(PREVIEW_BYTES)
+    text = raw.decode("utf-8", "replace").replace("\x00", "")
+    lines = text.splitlines()
+    if name.endswith(".csv") and lines:
+        rows = list(csv.reader(lines[:PREVIEW_ROWS + 1]))
+        total = max(0, _count_lines(path) - 1)
+        head = "".join("<th>%s</th>" % html.escape(c) for c in rows[0])
+        body_rows = "".join("<tr>%s</tr>" % "".join(
+            "<td>%s</td>" % html.escape(c) for c in r) for r in rows[1:])
+        note = "แสดง %d แถวแรกจาก %d แถว · %d คอลัมน์" % (
+            len(rows) - 1, total, len(rows[0]))
+        inner = ('<div class="table"><table><tr>%s</tr>%s</table></div>'
+                 % (head, body_rows))
+    else:
+        if name.endswith(".json") and size <= PREVIEW_BYTES:
+            try:
+                text = json.dumps(json.loads(text), ensure_ascii=False,
+                                  indent=1)
+            except ValueError:
+                pass
+            lines = text.splitlines()
+        shown = lines[-200:] if tail else lines[:200]
+        note = ("แสดง %d บรรทัด%s" % (len(shown), "ล่าสุด" if tail else "แรก")
+                if len(shown) < len(lines) or size > PREVIEW_BYTES else
+                "ทั้งไฟล์ %d บรรทัด" % len(lines))
+        inner = '<pre class="text">%s</pre>' % html.escape("\n".join(shown))
+    q = urllib.parse.quote(name)
+    body = (
+        '<section class="card"><div class="item" style="padding:0 0 14px">%s'
+        '<span class="tx"><b>%s</b><small>%s · %s%s</small></span></div>'
+        '<div class="btnrow"><a class="btn" href="/files/%s" target="_blank" '
+        'rel="noopener" download>%sดาวน์โหลดไฟล์</a><a class="btn plain" '
+        'href="/files">%sไฟล์ทั้งหมด</a></div></section>'
+        '<section class="card preview"><h2>ตัวอย่าง <small class="muted">%s'
+        '</small></h2>%s</section>' % (
+            _badge(name), html.escape(name),
+            entry["time"].strftime("%d/%m/%Y %H:%M"),
+            datafiles.human_size(size),
+            " · " + KIND_NOTE[entry["kind"]] if KIND_NOTE[entry["kind"]]
+            else "", q, ui.icon("download"), ui.icon("folder"), note, inner))
+    return ui.shell(name, body, back="/files", active="files",
+                    sub="ดูตัวอย่างไฟล์", css=FILES_CSS)
 
 
 def read_cell_ir(path):
@@ -184,45 +328,47 @@ VISUAL_PAGES = {
 }
 
 
-def text_page(name, body, download, sent=None, more=""):
+def text_page(name, body, download, sent=None, more="", back="/files"):
     """A text with a copy-all button and a download link. The page is
     plain http, where the clipboard API is off, so the copy selects a
     textarea and uses execCommand. With `sent`, copying or downloading
     tells the server (GET `sent`) so the next digest starts after it."""
-    text = html.escape(body)
-    return """<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>%s</title><style>
-body{font-family:-apple-system,sans-serif;margin:12px;background:#fff;color:#111}
-button,a.b{font-size:18px;padding:12px 16px;margin:0 8px 10px 0;border-radius:10px;
-border:0;background:#0a84ff;color:#fff;text-decoration:none;display:inline-block}
-a.b{background:#555}
-textarea{width:100%%;height:70vh;font:12px ui-monospace,monospace;box-sizing:border-box}
-@media (prefers-color-scheme:dark){body{background:#111;color:#eee}
-textarea{background:#222;color:#eee}}
-</style></head><body>
-<button id="c">คัดลอกทั้งหมด</button>
-<a class="b" id="d" href="%s">ดาวน์โหลดไฟล์</a>
-<a class="b" href="/files">กลับ</a>%s
-<div id="m"></div>
-<textarea id="t" readonly>%s</textarea>
-<script>
+    page = (
+        '<section class="card" style="display:grid;gap:12px">'
+        '<div class="btnrow"><button class="btn" id="c" type="button">%s'
+        '<span>คัดลอกทั้งหมด</span></button><a class="btn tonal" id="d" '
+        'href="%s" target="_blank" rel="noopener">%sดาวน์โหลด</a>%s</div>'
+        '<div id="m" role="status"></div>'
+        '<textarea id="t" rows="%d" readonly>%s</textarea></section>'
+        """<script>
 var sent = %s;
 function done() { if (sent) { fetch(sent); sent = null; } }
 document.getElementById('d').onclick = done;
 document.getElementById('c').onclick = function () {
-  var t = document.getElementById('t');
+  var t = document.getElementById('t'), m = document.getElementById('m');
   t.removeAttribute('readonly'); t.focus(); t.select();
   t.setSelectionRange(0, t.value.length);
   var ok = false;
   try { ok = document.execCommand('copy'); } catch (e) {}
   t.setAttribute('readonly', ''); t.blur();
   if (ok) done();
-  document.getElementById('m').textContent = ok ?
-    'คัดลอกแล้ว ไปวางในแชตได้เลย' : 'คัดลอกเองไม่ได้: แตะค้างในกล่อง เลือกทั้งหมด แล้วคัดลอก';
+  m.className = ok ? '' : 'err';
+  m.textContent = ok ? '✓ คัดลอกแล้ว ไปวางในแชตได้เลย' :
+    'คัดลอกเองไม่ได้: แตะค้างในกล่อง เลือกทั้งหมด แล้วคัดลอก';
 };
-</script></body></html>""" % (html.escape(name), html.escape(download),
-                              more, text, json.dumps(sent))
+</script>""" % (ui.icon("copy"), html.escape(download), ui.icon("download"),
+                more, max(4, min(40, body.count("\n") + 2)), html.escape(body),
+                json.dumps(sent)))
+    return ui.shell(name, page, back=back, active="files" if back ==
+                    "/files" else None, css=FILES_CSS)
+
+
+def not_found_page():
+    return ui.shell("ไม่พบหน้านี้", ui.empty(
+        'ไม่พบหน้าหรือไฟล์นี้ (ไฟล์อาจถูกลบไปแล้ว)<div class="btnrow" '
+        'style="justify-content:center;margin-top:14px"><a class="btn" '
+        'href="/">%sกลับหน้าหลัก</a></div>' % ui.icon("home"), "file"),
+        back="/")
 
 
 def digest_page(data_dir, query):
@@ -242,6 +388,12 @@ def digest_page(data_dir, query):
     return text, sent
 
 
+ICON_PATHS = ("/icon.png", "/apple-touch-icon.png",
+              "/apple-touch-icon-precomposed.png", "/favicon.ico")
+# the phone fetches these without the password when saving to home screen
+PUBLIC = ICON_PATHS + ("/manifest.webmanifest",)
+
+
 def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 car_name="Deepal S05", ir_path=None, car_key="deepal-s05",
                 password=None):
@@ -253,12 +405,13 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
     import base64
     import hmac
     page = PAGE.replace("Deepal S05", html.escape(car_name))
+    icon = []  # drawn on the first request, then kept
     if ir_path is None and data_dir:
         ir_path = os.path.join(data_dir, CELL_IR_FILE)
 
     class Handler(BaseHTTPRequestHandler):
-        def send_body(self, body, ctype, extra=()):
-            self.send_response(200)
+        def send_body(self, body, ctype, extra=(), status=200):
+            self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -287,9 +440,9 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
             return False
 
         def do_GET(self):
-            if not self.authorized():
-                return
             path = urllib.parse.urlparse(self.path).path
+            if path not in PUBLIC and not self.authorized():
+                return
             if path.startswith("/data"):
                 self.send_body(poller.json().encode("utf-8"),
                                "application/json; charset=utf-8")
@@ -300,6 +453,15 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
             elif path in ("/", "/index.html"):
                 self.send_body(page.encode("utf-8"),
                                "text/html; charset=utf-8")
+            elif path == "/manifest.webmanifest":
+                self.send_body(ui.manifest(car_name).encode("utf-8"),
+                               "application/manifest+json")
+            elif path in ICON_PATHS:
+                if not icon:
+                    icon.append(ui.icon_png())
+                self.send_body(icon[0], "image/png")
+            elif data_dir and path == "/tools":
+                self.html(tools_page())
             elif data_dir and path == "/digest":
                 from . import survey
                 query = urllib.parse.urlparse(self.path).query
@@ -316,32 +478,36 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                                        "attachment; filename=%s"
                                        % survey.DIGEST_FILE)])
                     return
-                self.send_body(text_page(
+                self.html(text_page(
                     "สรุปผลสำรวจ", text,
                     "/digest?dl=1" + ("&all=1" if "all" in q else ""), sent,
-                    ' <a class="b" href="/digest?all=1">ดูทั้งหมด</a>'
-                ).encode("utf-8"), "text/html; charset=utf-8")
+                    '<a class="btn plain" href="/digest?all=1">ดูทั้งหมด</a>',
+                    back="/tools"))
             elif data_dir and path in ("/files", "/files/"):
-                self.send_body(files_page(data_dir).encode("utf-8"),
-                               "text/html; charset=utf-8")
+                self.html(files_page(data_dir))
+            elif data_dir and path.startswith("/view/"):
+                entry = self.entry(path[len("/view/"):])
+                if entry:
+                    self.html(view_page(data_dir, entry))
             elif data_dir and path.startswith("/files/"):
-                name = urllib.parse.unquote(path[len("/files/"):])
-                if name not in dict(list_files(data_dir)):
-                    self.send_error(404)
+                entry = self.entry(path[len("/files/"):])
+                if not entry:
                     return
+                name = entry["name"]
                 with open(os.path.join(data_dir, name), "rb") as f:
                     body = f.read()
                 if name.endswith(".html"):  # open saved pages in place
-                    self.send_body(body, "text/html; charset=utf-8")
+                    self.html(ui.inject(body.decode("utf-8", "replace"),
+                                        name, back="/files",
+                                        active="files"))
                     return
                 query = urllib.parse.urlparse(self.path).query
                 if name.endswith(".txt") and "dl" not in query:
                     # one tap to copy on a phone (plain text in Safari
                     # can only be selected line by line)
-                    self.send_body(text_page(
+                    self.html(text_page(
                         name, body.decode("utf-8", "replace"),
-                        "/files/%s?dl=1" % urllib.parse.quote(name)
-                    ).encode("utf-8"), "text/html; charset=utf-8")
+                        "/files/%s?dl=1" % urllib.parse.quote(name)))
                     return
                 self.send_body(body, "application/octet-stream", [
                     ("Content-Disposition",
@@ -353,8 +519,7 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                     body = VISUAL_PAGES[path](visual, data_dir, car_key)
                 except (OSError, ValueError) as e:
                     body = visual.page("อ่านไฟล์ไม่ได้", html.escape(str(e)))
-                self.send_body(body.encode("utf-8"),
-                               "text/html; charset=utf-8")
+                self.html(body)
             elif data_dir and path == "/trends":
                 from . import report
                 out = os.path.join(data_dir, "trends.html")
@@ -363,13 +528,28 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                         os.path.join(data_dir, "checkup_history.csv"),
                         os.path.join(data_dir, "health_history.csv"), out)
                 except SystemExit as e:
-                    self.send_body(str(e).encode("utf-8"),
-                                   "text/plain; charset=utf-8")
+                    self.html(ui.shell("แนวโน้มสุขภาพรถ", ui.empty(
+                        html.escape(str(e)), "trend"), back=None,
+                        active="trends"))
                     return
-                with open(out, "rb") as f:
-                    self.send_body(f.read(), "text/html; charset=utf-8")
+                with open(out, encoding="utf-8") as f:
+                    self.html(ui.inject(f.read(), "แนวโน้มสุขภาพรถ",
+                                        active="trends"))
             else:
-                self.send_error(404)
+                self.html(not_found_page(), 404)
+
+        def html(self, text, status=200):
+            self.send_body(text.encode("utf-8"), "text/html; charset=utf-8",
+                           status=status)
+
+        def entry(self, quoted):
+            """The listed data file named in the path, or a 404 page."""
+            name = urllib.parse.unquote(quoted)
+            for e in datafiles.entries(data_dir):
+                if e["name"] == name:
+                    return e
+            self.html(not_found_page(), 404)
+            return None
 
         def log_message(self, *args):
             pass
@@ -380,10 +560,10 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
 def serve(elm, signals, arrays, capacity, host="127.0.0.1", port=8000,
           interval=2.0, csv_path=None, rules=None, notifier=None,
           car_name="Deepal S05", info=None, vehicle=None,
-          ir_path=CELL_IR_FILE, baselines=None):
+          ir_path=CELL_IR_FILE, baselines=None, dc_price=7.5):
     csv_log = snapshot.CsvLog(csv_path) if csv_path else None
     poller = Poller(elm, signals, arrays, capacity, interval, csv_log,
-                    rules, notifier, info, vehicle, baselines)
+                    rules, notifier, info, vehicle, baselines, dc_price)
     server = make_server(poller, host, port, car_name=car_name,
                          ir_path=ir_path)
     poller.start()
@@ -405,76 +585,118 @@ def serve(elm, signals, arrays, capacity, host="127.0.0.1", port=8000,
             csv_log.__exit__()
 
 
-PAGE = r"""<!doctype html>
-<html lang="th"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deepal S05 Cell Monitor</title>
-<style>
-:root { --bg:#eef2f1; --surface:#fff; --ink:#15211f; --muted:#5b6b68;
-  --line:#d3dcda; --accent:#0d7a70; --low:#2c68b0; --high:#c2601b;
-  --mid:#e6ecea; --bad:#b3261e; --on-bad:#fff; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0e1514; --surface:#16201e;
-  --ink:#e3ebe9; --muted:#93a4a0; --line:#2a3835; --accent:#3fc0b2;
-  --low:#6ea5ec; --high:#f0954f; --mid:#22302d; --bad:#e5484d; --on-bad:#fff;
-  color-scheme: dark; } }
-* { box-sizing: border-box; }
-[hidden] { display:none !important; }
-body { margin:0; background:var(--bg); color:var(--ink); padding:18px 16px 40px;
-  font-family:"IBM Plex Sans Thai","Noto Sans Thai",Tahoma,sans-serif; line-height:1.5; }
-.wrap { max-width:1120px; margin:0 auto; display:grid; gap:16px; }
-header { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; align-items:baseline; }
-h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:600; }
-.status { font-size:.85rem; color:var(--muted); }
-.status.err { color:var(--bad); font-weight:600; }
-.summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
-  background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-.stat { padding:12px 14px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); min-width:0; }
+HOME_CSS = """
+:root { --mid:#e8edf2; --low:#2f6fdb; --high:#e8590c; --on-bad:#ffffff;
+  --seg:#e4e9ef; }
+@media (prefers-color-scheme: dark) { :root { --mid:#1e2833; --low:#60a5fa;
+  --high:#fb923c; --on-bad:#ffffff; --seg:#18202a; } }
+#status.err { color:var(--bad); font-weight:600; }
+.alerts { display:grid; gap:8px; } .alerts:empty { display:none; }
+.alert { display:flex; gap:10px; align-items:flex-start; border-radius:14px;
+  padding:12px 14px; background:var(--warnbg); font-size:.92rem; }
+.alert::before { content:"!"; flex:none; display:grid; place-items:center;
+  width:22px; height:22px; border-radius:50%; background:var(--warn);
+  color:#fff; font-weight:800; font-size:.8rem; }
+.alert.crit { background:var(--badbg); font-weight:600; }
+.alert.crit::before { background:var(--bad); }
+.hero { display:grid; grid-template-columns:auto 1fr; gap:20px;
+  align-items:center; padding:18px; }
+.ring { position:relative; width:138px; height:138px; }
+.ring svg { width:100%; height:100%; transform:rotate(-90deg); display:block; }
+.ring circle { fill:none; stroke-width:11; }
+.ring .trk { stroke:var(--surface2); }
+.ring .arc { stroke:var(--accent); stroke-linecap:round;
+  transition:stroke-dasharray .6s ease, stroke .3s; }
+.ring .rv { position:absolute; inset:0; display:grid; place-content:center;
+  text-align:center; line-height:1.1; }
+.ring .rv b { font-size:2.15rem; font-weight:800; letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums; }
+.ring .rv small { color:var(--muted); font-size:.74rem; font-weight:700; }
+.hm { display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; min-width:0; }
+.hm div { min-width:0; }
+.hm span { display:block; color:var(--muted); font-size:.76rem; }
+.hm b { font-size:1.3rem; font-weight:700; font-variant-numeric:tabular-nums;
+  white-space:nowrap; }
+.hm b small { font-size:.74rem; font-weight:500; color:var(--muted);
+  margin-left:3px; }
+@media (min-width:760px) { .hm { grid-template-columns:repeat(4,1fr); } }
+@media (max-width:370px) { .hero { grid-template-columns:1fr;
+  justify-items:center; } .hm { width:100%; } }
+.summary { display:grid; gap:10px;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr)); }
+.stat { background:var(--surface); border:1px solid var(--line);
+  border-radius:16px; padding:12px 14px; min-width:0; box-shadow:var(--shadow); }
 .k { font-size:.78rem; color:var(--muted); }
-.v { font:600 1.25rem ui-monospace,Menlo,Consolas,monospace; font-variant-numeric:tabular-nums; }
-.v small { font-size:.78rem; font-weight:400; color:var(--muted); }
-.s { font:.76rem ui-monospace,Menlo,Consolas,monospace; color:var(--muted); }
+.v { font-size:1.3rem; font-weight:700; font-variant-numeric:tabular-nums;
+  line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v small { font-size:.76rem; font-weight:500; color:var(--muted); }
+.s { font-size:.75rem; color:var(--muted); white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; }
+.stat.bad { background:var(--badbg); border-color:transparent; }
 .stat.bad .v { color:var(--bad); }
-.tabs { display:flex; gap:4px; overflow-x:auto; border-bottom:1px solid var(--line); }
-.tabs button { font:inherit; font-size:.92rem; padding:8px 14px; border:0; background:none;
-  color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
-.tabs button.on { color:var(--ink); font-weight:600; border-bottom-color:var(--accent); }
+.tabs { display:flex; gap:4px; padding:4px; background:var(--seg);
+  border-radius:14px; overflow-x:auto; scrollbar-width:none; }
+.tabs::-webkit-scrollbar { display:none; }
+.tabs button { flex:1 0 auto; font:inherit; font-size:.88rem; font-weight:600;
+  padding:9px 12px; border:0; border-radius:11px; background:none;
+  color:var(--muted); cursor:pointer; white-space:nowrap; }
+.tabs button.on { background:var(--surface); color:var(--ink);
+  box-shadow:0 1px 3px rgba(16,24,40,.14); }
 .tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
-.panel { background:var(--surface); border:1px solid var(--line); border-radius:12px;
-  padding:14px; display:grid; gap:10px; min-width:0; }
-#cellsBody, #irBody { display:grid; gap:10px; min-width:0; }
-.meta { font-size:.85rem; color:var(--muted); }
-.meta b { color:var(--ink); font-weight:600; }
-.meta .bad { color:var(--bad); font-weight:600; }
-.cells { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:3px; }
-.cell { border-radius:4px; padding:5px 0 4px; text-align:center; background:var(--mid);
-  font:500 .76rem ui-monospace,Menlo,Consolas,monospace; line-height:1.15; }
-.cell b { display:block; font-size:.62rem; font-weight:400; opacity:.7; }
-.cell.ext { outline:2px solid var(--ink); outline-offset:-2px; }
+.panel { display:grid; gap:12px; }
+.panel h2 { margin:0; }
+#cellsBody, #irBody { display:grid; gap:12px; min-width:0; }
+.meta { font-size:.86rem; color:var(--muted); }
+.meta b { color:var(--ink); font-weight:700; }
+.meta .bad { color:var(--bad); font-weight:700; }
+.cells { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:4px; }
+.cell { border-radius:7px; padding:5px 0 4px; text-align:center;
+  background:var(--mid); font:600 .74rem/1.15 ui-monospace,"SF Mono",Menlo,
+  Consolas,monospace; }
+.cell b { display:block; font-size:.6rem; font-weight:500; opacity:.65; }
+.cell.ext { box-shadow:inset 0 0 0 2px var(--ink); }
 .cell.abn { background:var(--bad) !important; color:var(--on-bad); }
 .cell.abn b { opacity:.9; }
-.legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:.78rem; color:var(--muted); }
-.legend i { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-1px; margin-right:5px; }
-.temps { display:grid; grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); gap:6px; }
-.temp { border-radius:6px; padding:6px 8px; background:var(--mid);
-  font:600 .95rem ui-monospace,Menlo,Consolas,monospace; }
-.temp b { display:block; font-size:.68rem; font-weight:400; color:var(--muted); }
-.chart { overflow-x:auto; } .chart svg { width:100%; min-width:540px; height:auto; display:block; }
+.legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:.78rem;
+  color:var(--muted); }
+.legend i { display:inline-block; width:12px; height:12px; border-radius:4px;
+  vertical-align:-1px; margin-right:6px; }
+.temps { display:grid; grid-template-columns:repeat(auto-fill,minmax(76px,1fr));
+  gap:8px; }
+.temp { border-radius:12px; padding:8px 10px; background:var(--mid);
+  font-weight:700; font-size:1rem; font-variant-numeric:tabular-nums; }
+.temp b { display:block; font-size:.68rem; font-weight:500; color:var(--muted); }
+.chart { overflow-x:auto; }
+.chart svg { width:100%; min-width:540px; height:auto; display:block; }
 .chart text { fill:var(--muted); font:11px ui-monospace,Menlo,Consolas,monospace; }
 .note { font-size:.86rem; color:var(--muted); max-width:70ch; margin:0; }
 .note code { font-size:.8rem; }
-.facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0; margin:0; }
-.facts div { padding:8px 0; border-bottom:1px solid var(--line); }
+.facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  column-gap:20px; margin:0; }
+.facts div { padding:10px 0; border-bottom:1px solid var(--line); }
 .facts dt { font-size:.78rem; color:var(--muted); }
-.facts dd { margin:0; font:600 .95rem ui-monospace,Menlo,Consolas,monospace; overflow-wrap:anywhere; }
-.alerts { display:grid; gap:6px; }
-.alert { border-radius:10px; padding:10px 12px; border:1px solid var(--line);
-  background:var(--surface); font-size:.92rem; border-left:5px solid var(--high); }
-.alert.crit { border-left-color:var(--bad); font-weight:600; }
+.facts dd { margin:0; font-weight:600; font-size:.95rem; overflow-wrap:anywhere; }
+.dc { position:relative; overflow:hidden; background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--radius); padding:16px 16px 16px 21px;
+  box-shadow:var(--shadow); }
+.dc::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px;
+  background:var(--accent); }
+.dc.station::before, .dc.battery_hot::before { background:var(--bad); }
+.dc .big { display:flex; gap:24px; flex-wrap:wrap; margin-top:6px;
+  font-size:1.6rem; font-weight:800; font-variant-numeric:tabular-nums; }
+.dc .big small { display:block; font-size:.78rem; font-weight:500;
+  color:var(--muted); }
+.dc p { margin:8px 0 0; }
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
-</style></head><body><div class="wrap">
-<header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
-<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/digest">สรุปผลสำรวจ</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></nav></header>
+"""
+
+HOME_BODY = """<main class="page">
 <div class="alerts" id="alerts"></div>
+<section id="dcCard" class="dc" hidden></section>
+<section class="card hero">
+<div class="ring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="52"/><circle class="arc" id="socArc" cx="60" cy="60" r="52" stroke-dasharray="0 400"/></svg><div class="rv"><b id="socVal">-</b><small>SOC %</small></div></div>
+<div class="hm" id="hero"></div>
+</section>
 <div class="summary" id="summary"></div>
 <nav class="tabs" role="tablist" aria-label="รายละเอียด">
 <button role="tab" data-tab="cells" class="on">แรงดันเซลล์</button>
@@ -482,7 +704,7 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 <button role="tab" data-tab="ir">IR เซลล์</button>
 <button role="tab" data-tab="pack">ข้อมูลแพ็ก</button>
 </nav>
-<section class="panel" role="tabpanel" id="tab-cells">
+<section class="card panel" role="tabpanel" id="tab-cells">
 <h2>แรงดันรายเซลล์</h2>
 <div id="cellsBody" hidden>
 <div class="meta" id="cellsMeta"></div>
@@ -492,25 +714,30 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 </div>
 <p class="note" id="cellsNote">ยังอ่านแรงดันรายเซลล์ไม่ได้ ตอนนี้แสดงได้แค่เซลล์สูงสุด/ต่ำสุดด้านบน แผนผังจะขึ้นเมื่อเพิ่ม array ชื่อ "cells" ในไฟล์ --signals</p>
 </section>
-<section class="panel" role="tabpanel" id="tab-temps" hidden>
+<section class="card panel" role="tabpanel" id="tab-temps" hidden>
 <h2>อุณหภูมิแบต</h2>
 <div class="meta" id="tempsMeta"></div>
 <div class="temps" id="temps"></div>
 <p class="note" id="tempsNote">ยังอ่านอุณหภูมิรายจุดไม่ได้ แผนผังจะขึ้นเมื่อเพิ่ม array ชื่อ "temps" ในไฟล์ --signals</p>
 </section>
-<section class="panel" role="tabpanel" id="tab-ir" hidden>
+<section class="card panel" role="tabpanel" id="tab-ir" hidden>
 <h2>ความต้านทานภายใน (IR) รายเซลล์</h2>
 <div id="irBody"></div>
 <p class="note">วัดด้วย <code>python -m deepal_s05 health --ir 60 --cell-ir</code> ระหว่างที่กระแสเปลี่ยนมากๆ เช่น ให้คนอื่นขับแล้วเร่งสลับกับปล่อยคันเร่ง
 ค่าที่สูงกว่าเซลล์อื่นชัดเจนคือเซลล์ที่เริ่มเสื่อม ค่าเดี่ยวๆ ไม่แม่นนัก ให้ดูเทียบหลายครั้ง</p>
 </section>
-<section class="panel" role="tabpanel" id="tab-pack" hidden>
+<section class="card panel" role="tabpanel" id="tab-pack" hidden>
 <h2>ข้อมูลแพ็กและ BMS</h2>
 <dl class="facts" id="facts"></dl>
 <p class="note">แรงดัน/ความจุพิกัดเป็นค่าประมาณจากจำนวนเซลล์ × แรงดันระบุของเซลล์ ไม่ใช่ค่าที่ BMS รายงาน</p>
 </section>
-</div>
-<script>
+</main>
+"""
+
+PAGE = ui.document("Deepal S05 · แบตเตอรี่", ui.appbar(
+    "Deepal S05 · แบตเตอรี่", '<span id="status">กำลังเชื่อมต่อ...</span>',
+    right='<span class="chip" id="live">รอข้อมูล</span>') + HOME_BODY +
+    ui.tabbar("home", hidden=True, ident="tabbar") + r"""<script>
 var css = getComputedStyle(document.documentElement);
 function tok(n) { return css.getPropertyValue(n).trim(); }
 function rgb(h) { h = h.replace('#',''); return [0,2,4].map(function(p){ return parseInt(h.substr(p,2),16); }); }
@@ -518,6 +745,9 @@ function mix(a,b,t) { var A=rgb(a),B=rgb(b); return 'rgb('+A.map(function(v,i){ 
 function f(v,d) { return v===undefined||v===null ? '-' : (typeof v==='number' ? v.toFixed(d) : v); }
 function esc(t) { var e = document.createElement('div'); e.textContent = t; return e.innerHTML; }
 function stat(k,v,u,s,bad) { return '<div class="stat'+(bad?' bad':'')+'"><div class="k">'+k+'</div><div class="v">'+v+' <small>'+u+'</small></div><div class="s">'+(s||'&nbsp;')+'</div></div>'; }
+function hm(k,v,u) { return '<div><span>'+k+'</span><b>'+v+'<small>'+u+'</small></b></div>'; }
+function chip(cls, text) { var c = document.getElementById('live'); c.className = 'chip' + (cls ? ' ' + cls : ''); c.textContent = text; }
+var RING = 2 * Math.PI * 52;
 function median(a) { var b = a.filter(function(x){ return typeof x==='number'; }).sort(function(x,y){ return x-y; }); var n=b.length; return n ? (n%2 ? b[(n-1)/2] : (b[n/2-1]+b[n/2])/2) : null; }
 
 var last = {}, ir = null, tab = 'cells';
@@ -536,10 +766,15 @@ function render(d) {
   last = d;
   var st = document.getElementById('status');
   var age = d.time ? (Date.now()/1000 - d.time) : null;
-  if (d.error) { st.textContent = d.error; st.className = 'status err'; }
-  else if (!d.time) { st.textContent = d.status || 'รอข้อมูล...'; st.className = 'status'; }
-  else { st.textContent = (d.status ? d.status + ' · ' : '') + 'อัปเดต ' + new Date(d.time*1000).toLocaleTimeString('th-TH') + (age > 15 && !d.status ? ' (ข้อมูลเก่า)' : ''); st.className = 'status' + (age > 15 && !d.status ? ' err' : ''); }
-  document.getElementById('links').hidden = !d.files;
+  if (d.error) { st.textContent = d.error; st.className = 'err'; chip('err', 'ผิดพลาด'); }
+  else if (!d.time) { st.textContent = d.status || 'รอข้อมูล...'; st.className = ''; chip('', 'รอข้อมูล'); }
+  else {
+    var stale = age > 15;
+    st.textContent = (d.status ? d.status + ' · ' : '') + 'อัปเดต ' + new Date(d.time*1000).toLocaleTimeString('th-TH');
+    st.className = stale && !d.status ? 'err' : '';
+    if (!stale) chip('live', 'สด'); else if (d.status) chip('', 'ล่าสุด'); else chip('err', 'ข้อมูลเก่า');
+  }
+  document.getElementById('tabbar').hidden = !d.files;
   document.getElementById('alerts').innerHTML = (d.alerts||[]).map(function(a){
     return '<div class="alert'+(a.level>=3?' crit':'')+'">'+esc(a.text)+'</div>';
   }).join('');
@@ -549,12 +784,16 @@ function render(d) {
   var delta = v.cells_delta_mv !== undefined ? v.cells_delta_mv : v.cell_delta_mv;
   var mean = cells ? cells.reduce(function(a,b){return a+b;},0)/cells.length : null;
   var abn = cells ? cells.map(function(c,i){ return Math.abs(c-mean)*1000 > abnMv ? i : -1; }).filter(function(i){ return i>=0; }) : [];
-  var html = stat('SOC', f(v.soc,1), '%') + stat('แรงดันแพ็ก', f(v.pack_voltage,1), 'V') +
-    stat('กระแส', f(v.pack_current,1), 'A') + stat('กำลัง', f(v.pack_power_kw,2), 'kW') +
-    stat('เซลล์สูงสุด', f(hi,3), 'V', cells ? 'เซลล์ #'+v.cells_max_no : '') +
+  var soc = typeof v.soc === 'number' ? v.soc : null, arc = document.getElementById('socArc');
+  document.getElementById('socVal').textContent = f(soc, 1);
+  arc.setAttribute('stroke-dasharray', (soc === null ? 0 : Math.max(0, Math.min(100, soc)) / 100 * RING).toFixed(1) + ' 400');
+  arc.style.opacity = soc === null ? 0 : 1;
+  arc.style.stroke = soc !== null && soc < 15 ? tok('--bad') : soc !== null && soc < 30 ? tok('--warn') : '';
+  document.getElementById('hero').innerHTML = hm('กำลัง', f(v.pack_power_kw,2), 'kW') + hm('กระแส', f(v.pack_current,1), 'A') +
+    hm('แรงดันแพ็ก', f(v.pack_voltage,1), 'V') + hm('อุณหภูมิแบต', f(v.batt_temp_min,0)+'–'+f(v.batt_temp_max,0), '°C');
+  var html = stat('เซลล์สูงสุด', f(hi,3), 'V', cells ? 'เซลล์ #'+v.cells_max_no : '') +
     stat('เซลล์ต่ำสุด', f(lo,3), 'V', cells ? 'เซลล์ #'+v.cells_min_no : '') +
-    stat('ส่วนต่าง', f(delta,1), 'mV', abn.length ? 'ผิดปกติ '+abn.length+' เซลล์' : '', abn.length>0) +
-    stat('อุณหภูมิแบต', f(v.batt_temp_min,0)+'–'+f(v.batt_temp_max,0), '°C');
+    stat('ส่วนต่าง', f(delta,1), 'mV', abn.length ? 'ผิดปกติ '+abn.length+' เซลล์' : '', abn.length>0);
   if ('soh' in v) html += stat('SOH', f(v.soh,1), '%');
   html += stat('แบต 12V', f(v.aux_12v,2), 'V');
   if (v.motor_temp !== undefined) html += stat('มอเตอร์', f(v.motor_temp,0), '°C', 'อินเวอร์เตอร์ '+f(v.inverter_temp,0)+' °C', v.motor_temp > 110 || v.inverter_temp > 85);
@@ -583,7 +822,7 @@ function render(d) {
     document.getElementById('cellsLegend').innerHTML =
       '<span><i style="background:'+mix(tok('--mid'),tok('--low'),.85)+'"></i>ต่ำกว่าค่าเฉลี่ย</span>' +
       '<span><i style="background:'+mix(tok('--mid'),tok('--high'),.85)+'"></i>สูงกว่าค่าเฉลี่ย</span>' +
-      '<span><i style="outline:2px solid '+tok('--ink')+';outline-offset:-2px"></i>สูงสุด/ต่ำสุด</span>' +
+      '<span><i style="box-shadow:inset 0 0 0 2px '+tok('--ink')+'"></i>สูงสุด/ต่ำสุด</span>' +
       '<span><i style="background:'+tok('--bad')+'"></i>ผิดปกติ (ห่างค่าเฉลี่ยเกิน '+abnMv+' mV)</span>';
     bars(cells.map(function(c){ return (c-mean)*1000; }), v.cells_max_no-1, v.cells_min_no-1, abn);
   }
@@ -598,6 +837,18 @@ function render(d) {
     }).join('');
   }
   renderPack(v, info, cells);
+  renderDc(d.dc);
+}
+
+function renderDc(dc) {
+  var box = document.getElementById('dcCard');
+  box.hidden = !dc;
+  if (!dc) return;
+  box.className = 'dc ' + dc.state;
+  var eta = dc.reached ? 'ถึง '+dc.target+'% แล้ว' : (dc.eta_min===null ? 'ยังประเมินไม่ได้' : 'ถึง '+dc.target+'% อีก ~'+Math.round(dc.eta_min)+' นาที');
+  box.innerHTML = '<b>⚡ ชาร์จเร็ว DC</b><div class="big"><div>'+f(dc.accept_kw,1)+' kW<small>แบตรับได้ตอนนี้ (F233)</small></div><div>'+f(dc.supply_kw,1)+' kW<small>ตู้จ่ายจริง</small></div></div>'+
+    '<p>'+esc(dc.text)+'</p><p>'+eta+' · ชาร์จแล้ว '+f(dc.kwh,1)+' kWh ≈ <b>'+f(dc.baht,0)+'</b> บาท (ที่ '+f(dc.price,2)+' บาท/kWh)</p>'+
+    '<p class="note">เวลาประเมินจากกำลังเฉลี่ย 2 นาทีล่าสุด จริงจะนานกว่านี้เมื่อ SOC สูงเพราะกำลังลดลง · F233 ยังเป็นค่าที่รอยืนยัน</p>';
 }
 
 function renderPack(v, info, cells) {
@@ -655,9 +906,8 @@ function bars(dev, max, min, abn) {
 
 function poll() {
   fetch('/data', {cache:'no-store'}).then(function(r){ return r.json(); }).then(render)
-    .catch(function(){ var st=document.getElementById('status'); st.textContent='ติดต่อโปรแกรมไม่ได้ (ปิดไปแล้ว?)'; st.className='status err'; });
+    .catch(function(){ var st=document.getElementById('status'); st.textContent='ติดต่อโปรแกรมไม่ได้ (ปิดไปแล้ว?)'; st.className='err'; chip('err', 'ออฟไลน์'); });
 }
 show(['cells','temps','ir','pack'].indexOf(tab)>=0 ? tab : 'cells');
 poll(); setInterval(poll, 2000);
-</script></body></html>
-"""
+</script>""", HOME_CSS)

@@ -422,37 +422,46 @@ def _odo_km(samples):
     return odo[-1] - odo[0] if len(odo) >= 2 else None
 
 
+def _drive_sample(row):
+    """One drive-log row (dict) -> {t, time, speed, power, ...} or None when
+    the row has no usable time, speed or battery power."""
+    import datetime
+    try:
+        t = datetime.datetime.fromisoformat(row["time"]).timestamp()
+    except (KeyError, ValueError):
+        return None
+    speed = _num(row.get("speed_kmh"))
+    rpm = _num(row.get("motor_rpm"))
+    if rpm is None and row.get("did_7A7_FD07"):  # raw, from record
+        rpm = int(row["did_7A7_FD07"], 16) - 20000
+    if speed is None and rpm is not None:
+        from .pids import RPM_PER_KMH
+        speed = abs(rpm) / RPM_PER_KMH
+    power = _num(row.get("pack_power_kw"))
+    if power is None and _num(row.get("pack_current")) is not None \
+            and _num(row.get("pack_voltage")) is not None:
+        power = _num(row["pack_current"]) * _num(row["pack_voltage"]) / 1000
+    if speed is None or power is None:
+        return None
+    return {"t": t, "time": row["time"], "speed": speed, "power": power,
+            "odo": _num(row.get("odometer_km")),
+            "soc": _num(row.get("soc")),
+            "motor": _num(row.get("motor_temp")),
+            "inverter": _num(row.get("inverter_temp")),
+            "batt": _num(row.get("batt_temp_max"))}
+
+
 def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
     """Split drive-log rows (dicts from drive_*.csv) into trips at gaps of
     more than `gap_s` seconds and total distance, energy and peaks.
     Energy is battery-side (V x I, positive = discharge), so it includes
     the air conditioning; regen is the energy that went back in."""
-    import datetime
     trips, cur, prev = [], None, None
     for row in rows:
-        try:
-            t = datetime.datetime.fromisoformat(row["time"]).timestamp()
-        except (KeyError, ValueError):
+        sample = _drive_sample(row)
+        if sample is None:
             continue
-        speed = _num(row.get("speed_kmh"))
-        rpm = _num(row.get("motor_rpm"))
-        if rpm is None and row.get("did_7A7_FD07"):  # raw, from record
-            rpm = int(row["did_7A7_FD07"], 16) - 20000
-        if speed is None and rpm is not None:
-            from .pids import RPM_PER_KMH
-            speed = abs(rpm) / RPM_PER_KMH
-        power = _num(row.get("pack_power_kw"))
-        if power is None and _num(row.get("pack_current")) is not None \
-                and _num(row.get("pack_voltage")) is not None:
-            power = _num(row["pack_current"]) * _num(row["pack_voltage"]) / 1000
-        if speed is None or power is None:
-            continue
-        sample = {"t": t, "time": row["time"], "speed": speed, "power": power,
-                  "odo": _num(row.get("odometer_km")),
-                  "soc": _num(row.get("soc")),
-                  "motor": _num(row.get("motor_temp")),
-                  "inverter": _num(row.get("inverter_temp")),
-                  "batt": _num(row.get("batt_temp_max"))}
+        t, speed, power = sample["t"], sample["speed"], sample["power"]
         if cur is None or t - prev["t"] > gap_s:
             cur = {"start": row["time"], "samples": []}
             trips.append(cur)
@@ -487,3 +496,115 @@ def trip_summaries(rows, gap_s=300, max_step_s=30, min_km=0.3):
             "km_odometer": _odo_km(s),
             "batt_max": peak("batt")})
     return out
+
+
+def steady_windows(samples, window_s=30, spread_kmh=6, max_step_s=10):
+    """Stretches of a drive log where the speed held steady (max - min within
+    `spread_kmh`, no gap over `max_step_s`) for at least `window_s` seconds.
+    Returns [{kmh, kw, sec}] - the speed ramps between them are skipped, so
+    the power is a cruise (or standstill) figure, not an acceleration one."""
+    out, i, n = [], 0, len(samples)
+    while i < n:
+        j, lo, hi = i, samples[i]["speed"], samples[i]["speed"]
+        while j + 1 < n and samples[j + 1]["t"] - samples[j]["t"] <= max_step_s:
+            nlo = min(lo, samples[j + 1]["speed"])
+            nhi = max(hi, samples[j + 1]["speed"])
+            if nhi - nlo > spread_kmh:
+                break
+            lo, hi, j = nlo, nhi, j + 1
+        sec = samples[j]["t"] - samples[i]["t"]
+        if j > i and sec >= window_s:
+            win = samples[i:j + 1]
+            out.append({"kmh": sum(x["speed"] for x in win) / len(win),
+                        "kw": sum(x["power"] for x in win) / len(win),
+                        "sec": sec})
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def eco_table(groups, window_s=30, spread_kmh=6):
+    """groups: {tag: [drive-log rows of one file, ...]} -> {tag: {bin: {sec,
+    kw, kmh, kwh_100}}}. Speeds are binned to the nearest 10 km/h (bin 0 =
+    standing still, where kwh_100 is None because no distance is covered)."""
+    table = {}
+    for tag, rows in groups.items():
+        samples = [x for x in map(_drive_sample, rows) if x]
+        samples.sort(key=lambda x: x["t"])
+        acc = {}
+        for w in steady_windows(samples, window_s, spread_kmh):
+            b = 0 if w["kmh"] < 3 else int(round(w["kmh"] / 10.0)) * 10
+            a = acc.setdefault(b, {"sec": 0.0, "kw_s": 0.0, "kmh_s": 0.0})
+            a["sec"] += w["sec"]
+            a["kw_s"] += w["kw"] * w["sec"]
+            a["kmh_s"] += w["kmh"] * w["sec"]
+        table[tag] = {}
+        for b, a in sorted(acc.items()):
+            kw, kmh = a["kw_s"] / a["sec"], a["kmh_s"] / a["sec"]
+            table[tag][b] = {"sec": a["sec"], "kw": kw, "kmh": kmh,
+                             "kwh_100": kw / kmh * 100 if b else None}
+    return table
+
+
+class DcSession:
+    """Live view of a DC fast charge for the assistant card: what the
+    battery will accept (F233) against what the station delivers, the time
+    to a target SOC and the cost so far. update() is called with every
+    snapshot; it returns None when the car is not fast charging."""
+
+    END_GAP_S = 120  # no DC sample for this long = session over
+
+    def __init__(self, capacity_kwh, dc_price=7.5, target_soc=80,
+                 hot_c=40):
+        self.capacity, self.price = capacity_kwh, dc_price
+        self.target, self.hot = target_soc, hot_c
+        self.reset()
+
+    def reset(self):
+        self.kwh, self.last_t, self.start_soc = 0.0, None, None
+        self.recent = []  # [(time, supply_kw)]
+
+    def update(self, now, values):
+        supply = values.get("dc_supply_kw")
+        if supply is None:
+            if self.last_t is not None and now - self.last_t > self.END_GAP_S:
+                self.reset()
+            return None
+        soc = values.get("soc")
+        if self.last_t is not None and now - self.last_t > self.END_GAP_S:
+            self.reset()
+        if self.last_t is not None:
+            self.kwh += supply * (now - self.last_t) / 3600
+        if self.start_soc is None:
+            self.start_soc = soc
+        self.last_t = now
+        self.recent = [(t, p) for t, p in self.recent + [(now, supply)]
+                       if now - t <= 120]
+        avg = sum(p for _, p in self.recent) / len(self.recent)
+        accept = values.get("dc_accept_kw")
+        temp = values.get("batt_temp_max")
+        state, text = self._verdict(accept, avg, temp)
+        eta = None
+        if soc is not None and soc < self.target and avg > 1:
+            eta = (self.target - soc) / 100 * self.capacity / avg * 60
+        return {"accept_kw": accept, "supply_kw": supply, "avg_kw": avg,
+                "state": state, "text": text, "soc": soc,
+                "target": self.target, "eta_min": eta,
+                "reached": soc is not None and soc >= self.target,
+                "kwh": self.kwh, "baht": self.kwh * self.price,
+                "price": self.price, "temp": temp}
+
+    def _verdict(self, accept, avg, temp):
+        hot = temp is not None and temp >= self.hot
+        if accept is None or accept <= 0:
+            return "unknown", "อ่านกำลังที่แบตรับได้ (F233) ไม่ได้"
+        if avg < 0.75 * accept:
+            return "station", ("ตู้จ่ายน้อยกว่าที่แบตรับได้ (%.0f จาก %.0f kW)"
+                               " ช้าเพราะตู้ ลองย้ายหัวชาร์จ/ตู้อื่น"
+                               % (avg, accept))
+        if hot:
+            return "battery_hot", ("แบตรับได้แค่ %.0f kW และแบตร้อน %.0f °C"
+                                   " ช้าเพราะแบตร้อน" % (accept, temp))
+        return "battery", ("แบตรับได้ %.0f kW เต็มที่แล้ว ตู้จ่ายเต็มตามที่แบตรับ"
+                           % accept)

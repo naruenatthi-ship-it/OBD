@@ -132,3 +132,26 @@ def test_trip_summaries():
     assert a["motor_max"] == 60 and a["soc_start"] == 90
     assert abs(b["km"] - 36 * 3 / 60) < 0.01 and b["regen_kwh"] > 0.09
     assert pids.derived({"motor_rpm": -809})["speed_kmh"] == 10
+
+
+def test_eco_table_ac_split():
+    from deepal_s05 import analysis
+
+    def rec(power_at):  # 60 s parked, ramp, 40 s at 80, ramp, 40 s at 100
+        rows, t = [], 0
+        for speed, secs in ((0, 60), (40, 10), (80, 40), (90, 5), (100, 40)):
+            for _ in range(secs // 2):
+                rows.append({"time": "2026-10-16T12:%02d:%02d" % (t // 60,
+                                                                 t % 60),
+                             "speed_kmh": str(speed),
+                             "pack_power_kw": str(power_at(speed))})
+                t += 2
+        return rows
+    table = analysis.eco_table({
+        "off": rec(lambda v: 0.3 + v * 0.1),
+        "on": rec(lambda v: 1.3 + v * 0.1)})
+    off, on = table["off"], table["on"]
+    assert set(off) == {0, 80, 100}  # the ramps are not counted
+    assert abs(on[0]["kw"] - off[0]["kw"] - 1.0) < 0.01
+    assert abs(off[80]["kwh_100"] - 8.3 / 80 * 100) < 0.1
+    assert abs(on[100]["kwh_100"] - off[100]["kwh_100"] - 1.0) < 0.1
