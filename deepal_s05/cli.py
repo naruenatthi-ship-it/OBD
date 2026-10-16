@@ -1680,29 +1680,18 @@ def survey_digest(args):
     if not os.path.exists(path):
         print("ไม่เจอไฟล์ %s" % path)
         return 1
-    mark = os.path.join(args.dir, survey.DIGEST_MARK)
-    since = ""
-    if not args.all and not args.file:
-        try:
-            with open(mark, encoding="utf-8") as f:
-                since = f.read().strip()
-        except OSError:
-            pass
-    lines, newest = survey.digest(path, since)
-    if not lines:
-        print("ไม่มีผลใหม่ตั้งแต่สรุปครั้งก่อน (%s) ดูทั้งหมด: --all" % since)
+    text, newest = survey.digest_text(args.dir, args.all, args.file)
+    if text is None:
+        print("ไม่มีผลใหม่ตั้งแต่สรุปครั้งก่อน (%s) ดูทั้งหมด: --all" % newest)
         return 0
-    head = "สรุป %s%s" % (os.path.basename(path),
-                         " ตั้งแต่ " + since if since else "")
-    text = "\n".join([head] + lines) + "\n"
     out = os.path.join(args.dir, survey.DIGEST_FILE)
     with open(out, "w", encoding="utf-8") as f:
         f.write(text)
     print(text)
     print("บันทึกไว้ที่ %s (ส่งไฟล์นี้แทนไฟล์ดิบ)" % out)
-    if newest and not args.file:
-        with open(mark, "w", encoding="utf-8") as f:
-            f.write(newest)
+    print("ไม่ต้องพิมพ์ก็ได้: เปิดหน้า /digest ในเบราว์เซอร์")
+    if not args.file:
+        survey.mark_sent(args.dir, newest)
     return 0
 
 

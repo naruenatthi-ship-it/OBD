@@ -169,6 +169,17 @@ def test_dashboard_files_routes(tmp_path):
         for bad in ("/files/secret.txt", "/files/..%2F..%2Fetc%2Fpasswd"):
             with pytest.raises(urllib.error.HTTPError):
                 urllib.request.urlopen(base + bad)
+        # the digest page makes the summary itself; copying marks it sent
+        (tmp_path / "survey_results.csv").write_text(
+            "time,header,did,length,raw\n"
+            "2026-10-16T20:00:00,754,F1F0,1,8D\n", encoding="utf-8")
+        page = urllib.request.urlopen(base + "/digest").read().decode()
+        assert "F1F0 8D" in page and "/digest?sent=" in page
+        urllib.request.urlopen(base + "/digest?sent=2026-10-16T20%3A00%3A00")
+        page = urllib.request.urlopen(base + "/digest").read().decode()
+        assert "ไม่มีผลใหม่" in page
+        page = urllib.request.urlopen(base + "/digest?all=1").read().decode()
+        assert "F1F0 8D" in page
         trends = urllib.request.urlopen(base + "/trends").read().decode()
         assert "ยังไม่มีประวัติ" in trends
         assert json.loads(urllib.request.urlopen(base + "/data").read())[

@@ -280,3 +280,34 @@ def digest(path, since=""):
             out.append("  รหัส: " + " ".join(ident))
         out.extend(rest)
     return out, newest
+
+
+def digest_text(data_dir, all_rows=False, path=None):
+    """The digest as one text: what is new since the last one sent (all
+    of it with `all_rows`, or of a scan file `path`). Returns (text or
+    None when there is nothing new, time of the newest row)."""
+    path = path or os.path.join(data_dir, RESULTS_FILE)
+    if not os.path.exists(path):
+        return None, ""
+    since = ""
+    if not all_rows and path.endswith(RESULTS_FILE):
+        try:
+            with open(os.path.join(data_dir, DIGEST_MARK),
+                      encoding="utf-8") as f:
+                since = f.read().strip()
+        except OSError:
+            pass
+    lines, newest = digest(path, since)
+    if not lines:
+        return None, since
+    head = "สรุป %s%s" % (os.path.basename(path),
+                         " ตั้งแต่ " + since if since else "")
+    return "\n".join([head] + lines) + "\n", newest
+
+
+def mark_sent(data_dir, newest):
+    """The next digest starts after `newest` (an ISO time)."""
+    if newest:
+        with open(os.path.join(data_dir, DIGEST_MARK), "w",
+                  encoding="utf-8") as f:
+            f.write(newest)

@@ -139,6 +139,7 @@ def files_page(data_dir):
             'padding-left:18px}.t{font-family:monospace;color:#667}small{'
             'color:#667}</style><body>'
             '<h1>ไฟล์ข้อมูล</h1><p><a href="/">กลับหน้าหลัก</a> · '
+            '<b><a href="/digest">สรุปผลสำรวจ (ส่งให้ Claude)</a></b> · '
             '<a href="/trends">กราฟแนวโน้ม</a> · '
             '<a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · '
             '<a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · '
@@ -183,12 +184,12 @@ VISUAL_PAGES = {
 }
 
 
-def text_page(name, body):
-    """A text file with a copy-all button and a download link. The page
-    is plain http, where the clipboard API is off, so the copy selects a
-    textarea and uses execCommand."""
-    text = html.escape(body.decode("utf-8", "replace"))
-    quoted = urllib.parse.quote(name)
+def text_page(name, body, download, sent=None, more=""):
+    """A text with a copy-all button and a download link. The page is
+    plain http, where the clipboard API is off, so the copy selects a
+    textarea and uses execCommand. With `sent`, copying or downloading
+    tells the server (GET `sent`) so the next digest starts after it."""
+    text = html.escape(body)
     return """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>%s</title><style>
@@ -201,11 +202,14 @@ textarea{width:100%%;height:70vh;font:12px ui-monospace,monospace;box-sizing:bor
 textarea{background:#222;color:#eee}}
 </style></head><body>
 <button id="c">คัดลอกทั้งหมด</button>
-<a class="b" href="/files/%s?dl=1">ดาวน์โหลดไฟล์</a>
-<a class="b" href="/files">กลับ</a>
+<a class="b" id="d" href="%s">ดาวน์โหลดไฟล์</a>
+<a class="b" href="/files">กลับ</a>%s
 <div id="m"></div>
 <textarea id="t" readonly>%s</textarea>
 <script>
+var sent = %s;
+function done() { if (sent) { fetch(sent); sent = null; } }
+document.getElementById('d').onclick = done;
 document.getElementById('c').onclick = function () {
   var t = document.getElementById('t');
   t.removeAttribute('readonly'); t.focus(); t.select();
@@ -213,10 +217,28 @@ document.getElementById('c').onclick = function () {
   var ok = false;
   try { ok = document.execCommand('copy'); } catch (e) {}
   t.setAttribute('readonly', ''); t.blur();
+  if (ok) done();
   document.getElementById('m').textContent = ok ?
-    'คัดลอกแล้ว ไปวางในแชตได้เลย' : 'คัดลอกเองไม่ได้: แตะค้างในกล่องแล้วเลือก "คัดลอก"';
+    'คัดลอกแล้ว ไปวางในแชตได้เลย' : 'คัดลอกเองไม่ได้: แตะค้างในกล่อง เลือกทั้งหมด แล้วคัดลอก';
 };
-</script></body></html>""" % (html.escape(name), quoted, text)
+</script></body></html>""" % (html.escape(name), html.escape(download),
+                              more, text, json.dumps(sent))
+
+
+def digest_page(data_dir, query):
+    """/digest: the survey digest made when the page opens (nothing to
+    type on the Pi); copying it marks it sent."""
+    from . import survey
+    q = urllib.parse.parse_qs(query)
+    all_rows = "all" in q
+    text, newest = survey.digest_text(data_dir, all_rows)
+    if text is None:
+        text = ("ยังไม่มีผล survey" if not newest else
+                "ไม่มีผลใหม่ตั้งแต่ส่งครั้งก่อน (%s)" % newest)
+        newest = None
+    sent = None if all_rows or not newest else \
+        "/digest?sent=" + urllib.parse.quote(newest)
+    return text, sent
 
 
 def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
@@ -277,6 +299,27 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
             elif path in ("/", "/index.html"):
                 self.send_body(page.encode("utf-8"),
                                "text/html; charset=utf-8")
+            elif data_dir and path == "/digest":
+                from . import survey
+                query = urllib.parse.urlparse(self.path).query
+                q = urllib.parse.parse_qs(query)
+                if "sent" in q:
+                    survey.mark_sent(data_dir, q["sent"][0])
+                    self.send_body(b"ok", "text/plain; charset=utf-8")
+                    return
+                text, sent = digest_page(data_dir, query)
+                if "dl" in q:
+                    self.send_body(text.encode("utf-8"),
+                                   "application/octet-stream", [(
+                                       "Content-Disposition",
+                                       "attachment; filename=%s"
+                                       % survey.DIGEST_FILE)])
+                    return
+                self.send_body(text_page(
+                    "สรุปผลสำรวจ", text,
+                    "/digest?dl=1" + ("&all=1" if "all" in q else ""), sent,
+                    ' <a class="b" href="/digest?all=1">ดูทั้งหมด</a>'
+                ).encode("utf-8"), "text/html; charset=utf-8")
             elif data_dir and path in ("/files", "/files/"):
                 self.send_body(files_page(data_dir).encode("utf-8"),
                                "text/html; charset=utf-8")
@@ -292,10 +335,12 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                     return
                 query = urllib.parse.urlparse(self.path).query
                 if name.endswith(".txt") and "dl" not in query:
-                    # digests: one tap to copy on a phone (plain text
-                    # in Safari can only be selected line by line)
-                    self.send_body(text_page(name, body).encode("utf-8"),
-                                   "text/html; charset=utf-8")
+                    # one tap to copy on a phone (plain text in Safari
+                    # can only be selected line by line)
+                    self.send_body(text_page(
+                        name, body.decode("utf-8", "replace"),
+                        "/files/%s?dl=1" % urllib.parse.quote(name)
+                    ).encode("utf-8"), "text/html; charset=utf-8")
                     return
                 self.send_body(body, "application/octet-stream", [
                     ("Content-Disposition",
@@ -427,7 +472,7 @@ h1 { margin:0; font-size:1.35rem; } h2 { margin:0; font-size:1rem; font-weight:6
 @media (max-width:620px) { .cells { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style></head><body><div class="wrap">
 <header><h1>Deepal S05 · แบตเตอรี่</h1><div class="status" id="status">กำลังเชื่อมต่อ...</div>
-<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></nav></header>
+<nav class="status" id="links" hidden><a href="/files">ไฟล์ข้อมูล</a> · <a href="/digest">สรุปผลสำรวจ</a> · <a href="/trends">กราฟแนวโน้ม</a> · <a href="/topology">แผนผัง ECU</a> · <a href="/dyno">ไดโน</a> · <a href="/charge">กราฟชาร์จ</a> · <a href="/freeze">ภาพนิ่งโค้ด</a> · <a href="/health">เตือนล่วงหน้า</a> · <a href="/cost">ค่าไฟชาร์จ</a></nav></header>
 <div class="alerts" id="alerts"></div>
 <div class="summary" id="summary"></div>
 <nav class="tabs" role="tablist" aria-label="รายละเอียด">
