@@ -214,6 +214,10 @@ do_command() {
             as_root /sbin/shutdown -r now ;;
         help|-h|--help) usage ;;
         "")      menu ;;
+        [0-9]|[0-9][0-9])
+            echo "ตัวเลขใช้ได้เฉพาะในเมนู: พิมพ์ obd เฉยๆ แล้วเลือกหมายเลข"
+            echo "หรือพิมพ์ชื่อคำสั่งตรงๆ เช่น obd update, obd check, obd off"
+            return 1 ;;
         *)       run "$cmd" "$@" ;;
     esac
 }
