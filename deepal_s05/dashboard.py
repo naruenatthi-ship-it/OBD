@@ -681,7 +681,7 @@ HOME_CSS = """
   box-shadow:var(--shadow); }
 .dc::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px;
   background:var(--accent); }
-.dc.station::before, .dc.battery_hot::before { background:var(--bad); }
+.dc.station::before, .dc.battery_hot::before, .dc.soft::before { background:var(--bad); }
 .dc .big { display:flex; gap:24px; flex-wrap:wrap; margin-top:6px;
   font-size:1.6rem; font-weight:800; font-variant-numeric:tabular-nums; }
 .dc .big small { display:block; font-size:.78rem; font-weight:500;
@@ -693,6 +693,7 @@ HOME_CSS = """
 HOME_BODY = """<main class="page">
 <div class="alerts" id="alerts"></div>
 <section id="dcCard" class="dc" hidden></section>
+<section id="tyreCard" class="dc" hidden></section>
 <section class="card hero">
 <div class="ring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="52"/><circle class="arc" id="socArc" cx="60" cy="60" r="52" stroke-dasharray="0 400"/></svg><div class="rv"><b id="socVal">-</b><small>SOC %</small></div></div>
 <div class="hm" id="hero"></div>
@@ -838,6 +839,17 @@ function render(d) {
   }
   renderPack(v, info, cells);
   renderDc(d.dc);
+  renderTyres(d.tyres);
+}
+
+function renderTyres(t) {
+  var box = document.getElementById('tyreCard');
+  box.hidden = !t;
+  if (!t) return;
+  box.className = 'dc ' + t.state;
+  var html = '<b>🛞 ลมยาง (เทียบความเร็ว 4 ล้อ)</b><p>'+esc(t.text)+'</p>';
+  if (t.dev) html += '<div class="big">'+t.dev.map(function(d,i){ return '<div>'+(d>=0?'+':'')+d.toFixed(2)+'%<small>'+esc(t.wheels[i])+'</small></div>'; }).join('')+'</div>';
+  box.innerHTML = html + '<p class="note">+ = ล้อหมุนเร็วขึ้น (ลมอ่อน) · เตือนเมื่อเกิน +'+t.warn_pct+'% · ทดลอง ยังไม่เคยเจอยางอ่อนจริง · เติมลมแล้วพิมพ์ obd tyres reset</p>';
 }
 
 function renderDc(dc) {

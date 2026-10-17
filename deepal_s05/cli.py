@@ -1778,6 +1778,18 @@ def cmd_soh(args):
     return 0
 
 
+def cmd_tyres(args):
+    from . import tyres
+    if args.action == "reset":
+        tyres.Monitor(args.dir).reset()
+        print("เริ่มเรียนรู้ยางใหม่แล้ว: ขับทางตรงเร็วกว่า %d km/h รวม ~%d นาที"
+              " (เช็กให้ลมยางถูกต้องก่อน)" % (
+                  tyres.MIN_KMH, tyres.BASELINE_N * 5 // 60))
+        return 0
+    print(tyres.report(args.dir))
+    return 0
+
+
 def cmd_predict(args):
     from . import predict
     findings = predict.assess(args.dir, args.capacity)
@@ -2349,6 +2361,13 @@ def build_parser():
     so = sub.add_parser("soh", help="วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)")
     so.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
     so.set_defaults(func=cmd_soh)
+
+    ty = sub.add_parser("tyres", help="เตือนยางอ่อนจากความเร็ว 4 ล้อ (ทดลอง)")
+    ty.add_argument("action", nargs="?", default="status",
+                    choices=["status", "reset"],
+                    help="reset = เรียนรู้ยางใหม่ (หลังเติมลม/เปลี่ยนยาง)")
+    ty.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    ty.set_defaults(func=cmd_tyres)
 
     pr = sub.add_parser("predict",
                         help="เตือนล่วงหน้า: ชิ้นไหนเริ่มผิดปกติ/จะถึงเกณฑ์เมื่อไร"

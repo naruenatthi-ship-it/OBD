@@ -15,7 +15,7 @@ import time
 import traceback
 
 from . import (alerts, analysis, cost, dashboard, identity, pids, snapshot,
-               survey)
+               survey, tyres)
 from .elm327 import ElmError
 
 
@@ -98,6 +98,8 @@ class Autopilot:
         self.dc = analysis.DcSession(
             capacity, cost.load_tariff(data_dir)["dc_price"])
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
+        self.tyres = tyres.Monitor(data_dir, clock) if any(
+            s.key == "motor_rpm" for s in signals) else None
         self.baselines = baselines or {}  # usual values, from checkups
         self.vehicle = vehicle  # BMS identification is read once when awake
         self.bms_read = vehicle is None
@@ -194,6 +196,12 @@ class Autopilot:
             self.state.update(time=snap.time, values=values, arrays={},
                               alerts=[], status="รถตื่นแต่ BMS ยังไม่ตอบ")
             return self.interval
+        tyre = None
+        if self.tyres is not None:
+            try:
+                tyre = self.tyres.round(self.elm, values)
+            except (ElmError, OSError):
+                pass  # the next round reads the wheels again
         self.log_drive(snap)
         if not self.bms_read:
             self.bms_read = True
@@ -212,7 +220,7 @@ class Autopilot:
             self.notifier.notify(found)
         self.state.update(time=snap.time, values=values, arrays=snap.arrays,
                           errors=snap.errors, error=None,
-                          dc=self.dc.update(snap.time, values),
+                          dc=self.dc.update(snap.time, values), tyres=tyre,
                           status="รถตื่น กำลังบันทึก",
                           alerts=[{"level": a.level, "text": a.text()}
                                   for a in found])
