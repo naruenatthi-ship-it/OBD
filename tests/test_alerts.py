@@ -303,9 +303,9 @@ def test_dc_charging_care_alerts():
     rules = alerts.merge_rules(alerts.DEFAULT_RULES,
                                vehicles.deepal_s05().rule_overrides)
 
-    def check(soc, current, temp):
+    def check(soc, current, temp, rpm=None):
         values = {"soc": soc, "pack_current": current, "pack_voltage": 400,
-                  "batt_temp_max": temp}
+                  "batt_temp_max": temp, "motor_rpm": rpm}
         values.update(pids.derived(values))
         return {a.key: a.level for a in alerts.evaluate(values, rules)}
     assert check(86, -120, 38) == {"dc_charge_soc": alerts.WARN}
@@ -313,6 +313,9 @@ def test_dc_charging_care_alerts():
     assert check(70, -120, 46)["dc_charge_temp"] == alerts.CRIT
     assert check(95, -16, 42) == {}      # home AC charging: fine
     assert check(95, 30, 42) == {}       # driving
+    # regen braking puts as much in as a DC charger, but the car moves
+    assert check(86, -119, 42, rpm=6400) == {}
+    assert check(86, -120, 38, rpm=0) == {"dc_charge_soc": alerts.WARN}
 
 
 def test_dc_session_verdicts():

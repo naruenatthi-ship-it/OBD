@@ -204,15 +204,19 @@ def derived(values):
     if isinstance(rpm, (int, float)):
         out["speed_kmh"] = abs(rpm) / RPM_PER_KMH
     # fast (DC) charging: more than AC can push into the pack (charging is
-    # negative on the S05); copies of SOC and pack temperature that only
-    # exist then, so the alert rules can warn about them
-    if i is not None and i < -DC_CHARGE_A:
+    # negative on the S05) with the car standing: regen braking also puts
+    # over 100 A in (a "stop DC charging" alert came while driving). The
+    # motor ECU may not answer while charging, so no rpm counts as still.
+    # Copies of SOC and pack temperature that only exist then, so the
+    # alert rules can warn about them
+    moving = isinstance(rpm, (int, float)) and abs(rpm) >= 50
+    if i is not None and i < -DC_CHARGE_A and not moving:
         if values.get("soc") is not None:
             out["dc_charge_soc"] = values["soc"]
         if values.get("batt_temp_max") is not None:
             out["dc_charge_temp"] = values["batt_temp_max"]
-    if i is not None and i < -DC_CHARGE_A and v is not None:
-        out["dc_supply_kw"] = -v * i / 1000  # what the pack takes in
+        if v is not None:
+            out["dc_supply_kw"] = -v * i / 1000  # what the pack takes in
     # insulation resistance per volt of pack voltage, the unit safety
     # standards use (ISO 6469-3: at least 100 ohm/V on the DC side)
     r = values.get("insulation_kohm")
