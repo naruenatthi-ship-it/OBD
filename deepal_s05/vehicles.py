@@ -98,6 +98,12 @@ DEEPAL_RULES = [
     {"key": "dc_charge_temp", "label": "แบตร้อนระหว่างชาร์จเร็ว DC",
      "unit": "°C", "warn_above": 40, "critical_above": 45,
      "advice": "แบตร้อนขณะชาร์จ DC ถ้าไม่รีบ หยุดชาร์จหรือพอที่ 80% แล้วให้แบตเย็นลง"},
+    # one wheel turning faster than when the tyres were learned (tyres.py,
+    # EXPERIMENTAL limit)
+    {"key": "tyre_soft_pct", "label": "ลมยางอาจอ่อน (เทียบความเร็วล้อ)",
+     "unit": "%", "warn_above": 0.5,
+     "advice": "ล้อหนึ่งหมุนเร็วกว่าล้ออื่นผิดปกติ เช็กลมยางทั้ง 4 ล้อ"
+               " (เติมแล้ว obd tyres reset)"},
 ]
 
 

@@ -57,6 +57,8 @@ usage() {
   survey digest    สรุปผลใหม่เป็นข้อความสั้น (หรือเปิดหน้า /digest ไม่ต้องพิมพ์)
   soh              วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)
   cost             ค่าไฟการชาร์จรายเดือน
+  tyres            เตือนยางอ่อน (เทียบความเร็ว 4 ล้อตอนขับทางตรง, ทดลอง)
+  tyres reset      เรียนรู้ยางใหม่ หลังเติมลมให้ถูกต้อง/เปลี่ยนยาง
   canscan [ชื่อ]    ดักฟัง CAN ที่รถกระจายเอง (ฟังอย่างเดียว ~3 นาที) เช่น obd canscan charging
   cancompare       เทียบ canscan สองครั้งล่าสุด
   canfind ตัวเลข    ค้นตัวเลขในผล canscan ล่าสุด เช่น obd canfind 42800 (เลขไมล์หน้าปัด)
@@ -419,6 +421,9 @@ do_command() {
         soh|cost)
             cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 "$cmd" \
                 --dir "$DATA" "$@" ;;
+        tyres)
+            cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 tyres \
+                "${1:-status}" --dir "$DATA" ;;
         canscan)
             run canscan --save "$DATA/canscan_${1:-scan}_$STAMP.csv" ;;
         canfind)
@@ -474,7 +479,7 @@ menu() {
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
                  "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
-                 "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "ออก")
+                 "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "tyres  เตือนยางอ่อน" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"
     PS3="หมายเลข: "
     select item in "${items[@]}"; do

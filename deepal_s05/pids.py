@@ -153,6 +153,21 @@ MOTOR_SIGNALS = [
            CANDIDATE, lambda d, c: _u16(d), header=MOTOR_HEADER),
 ]
 
+# Wheel speeds from the brake ECU (780), 0.1 km/h without sign (reversing
+# reads positive too), from a 12-minute drive on a Thai S05 (2026-10-17):
+# on full right lock the right wheels were slower, on full left lock the
+# left ones, and at 80 km/h on the speedometer they read 77.0 (the
+# speedometer reads ~4 % high). Read only while driving, by tyres.py.
+WHEEL_HEADER = "780"
+WHEEL_SIGNALS = [
+    Signal(key, label, did, "km/h", 2, CANDIDATE,
+           lambda d, c: _u16(d) / 10, header=WHEEL_HEADER)
+    for key, label, did in (
+        ("wheel_fl_kmh", "ความเร็วล้อหน้าซ้าย", 0xFD0C),
+        ("wheel_fr_kmh", "ความเร็วล้อหน้าขวา", 0xFD0D),
+        ("wheel_rl_kmh", "ความเร็วล้อหลังซ้าย", 0xFD0E),
+        ("wheel_rr_kmh", "ความเร็วล้อหลังขวา", 0xFD0F))]
+
 # Odometer, 0.1 km. Found by a DID scan of every ECU on a Thai S05
 # (2026-10-16 17:06): ECU 700 F1AE = 8E 88 06 00 (little endian) and the
 # radars 753/754 F1F5 = 06 88 8E (big endian), both 42,817.4 km, between
