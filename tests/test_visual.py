@@ -33,6 +33,9 @@ def test_topology_states(tmp_path):
     page = visual.topology_html(topo)
     assert "แบตเตอรี่ไฟแรงสูง (BMS)" in page and "P1B27-05" in page
     assert "2139010-DQ07" in page
+    # scan-tool overview: a tile per ECU with its code count
+    assert '<a class="tile bad" href="#ecu-7A1"><b>BMS</b>' in page
+    assert 'id="ecu-7A1"' in page and 'class="badge"' in page
 
 
 def test_topology_prefers_newer_history_and_handles_nothing(tmp_path):

@@ -28,6 +28,16 @@ ECU_NAMES = {
     },
 }
 
+# short tile labels, scan-tool style; "?" = guessed from the part number
+# or what the ECU answered (docs/RESULTS.md), not confirmed
+ECU_SHORT = {
+    "deepal-s05": {
+        "700": "GW", "706": "T-BOX", "753": "IPK?", "754": "IPK?",
+        "780": "ESC", "785": "EPS", "791": "RADAR", "7A1": "BMS",
+        "7A4": "OBC?", "7A7": "MCU",
+    },
+}
+
 # page parts on top of ui.CSS (colours and cards come from there)
 CSS = """
 .grid { display:grid; gap:14px;
@@ -214,11 +224,11 @@ def ecu_card(e, names):
             html.escape(c.get("status_text") or "")) for c in e["codes"] or [])
     count = len(e["codes"] or [])
     return (
-        '<details class="ecu %s"><summary><span class="dot"></span>'
+        '<details class="ecu %s" id="ecu-%s"><summary><span class="dot"></span>'
         '<span class="hdr">%s</span><span class="nm">%s<small>%s</small></span>'
         '<span class="cnt">%s</span></summary><div class="body">'
         '<table>%s</table>%s</div></details>' % (
-            state, html.escape(e["header"]),
+            state, html.escape(e["header"]), html.escape(e["header"]),
             html.escape(name or "กล่อง %s" % e["header"]),
             html.escape(part), "%d โค้ด" % count if count else
             STATUS_TEXT[state] if state != "ok" else "ปกติ",
@@ -249,6 +259,17 @@ TOPO_CSS = """
 .nm { flex:1; min-width:0; } .nm small { display:block; color:var(--muted); }
 .cnt { color:var(--c); font-size:.85rem; font-weight:600; text-align:right; }
 .body { padding:0 12px 12px; } .codes { margin:8px 0 0; padding-left:18px; }
+.map { display:grid; gap:14px 10px; padding-top:8px;
+  grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); }
+.tile { position:relative; display:block; text-align:center; padding:10px 4px;
+  border-radius:10px; text-decoration:none; color:var(--ink);
+  background:var(--surface); border:2px solid var(--c); }
+.tile.ok { --c:var(--ok); } .tile.warn { --c:var(--warn); background:var(--warnbg); }
+.tile.bad { --c:var(--bad); background:var(--badbg); } .tile.none { --c:var(--none); }
+.tile b { display:block; font-size:1rem; } .tile small { color:var(--muted); }
+.badge { position:absolute; top:-9px; right:-6px; min-width:22px; height:22px;
+  line-height:20px; border-radius:11px; background:var(--surface);
+  border:2px solid var(--c); color:var(--c); font:700 .8rem system-ui; }
 .groups { display:grid; gap:16px;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); }
 """
@@ -256,6 +277,7 @@ TOPO_CSS = """
 
 def topology_html(topo, car="deepal-s05"):
     names = ECU_NAMES.get(car, {})
+    short = ECU_SHORT.get(car, {})
     ecus = topo["ecus"]
     if not ecus:
         return page("แผนผังกล่อง ECU", '<section class="card">ยังไม่มีข้อมูล'
@@ -280,6 +302,17 @@ def topology_html(topo, car="deepal-s05"):
                 '%s</div></section>' % (html.escape(title), len(items),
                                         "".join(ecu_card(e, names)
                                                 for e in items)))
+    # every ECU at a glance with its code count, like a workshop scan
+    # tool; a tap opens that ECU's card below
+    tiles = "".join(
+        '<a class="tile %s" href="#ecu-%s"><b>%s</b><small>%s</small>%s</a>' % (
+            e["state"], html.escape(e["header"]),
+            html.escape(short.get(e["header"], e["header"])),
+            html.escape(e["header"]) if e["header"] in short else "",
+            '<span class="badge">%d</span>' % len(e["codes"])
+            if e["codes"] else "") for e in ecus)
+    groups.insert(0, '<section class="card"><h2>ภาพรวม · ตัวเลข = จำนวนโค้ด'
+                  '</h2><div class="map">%s</div></section>' % tiles)
     src = "ECU จาก %s · โค้ดจาก %s" % (
         topo["ecus_file"] or "-", topo["dtc_time"] or "ยังไม่ได้อ่าน")
     body = ('<style>%s</style><div class="stats"><div class="stat"><b>%d</b>'
@@ -287,8 +320,11 @@ def topology_html(topo, car="deepal-s05"):
             '<p class="muted">%s · กดที่กล่องเพื่อดูรายละเอียด · ชื่อกล่องที่ใส่ไว้'
             'คือที่ยืนยันกับรถจริงแล้ว นอกนั้นแสดงรหัสชิ้นส่วนให้เทียบเอง · '
             'สีเหลืองส่วนมากเป็นโค้ดเก่าหรือขาดการสื่อสารชั่วคราว (U-code)'
-            ' ไม่ได้แปลว่าเสีย</p>' % (TOPO_CSS, len(ecus), stats,
-                                       "".join(groups), html.escape(src)))
+            ' ไม่ได้แปลว่าเสีย · ชื่อย่อที่มี ? คือเดาเอา</p>'
+            '<script>function o(){var d=location.hash&&document.getElementById('
+            'location.hash.slice(1));if(d){d.open=true;}}'
+            'addEventListener("hashchange",o);o();</script>' % (
+                TOPO_CSS, len(ecus), stats, "".join(groups), html.escape(src)))
     return page("แผนผังกล่อง ECU", body)
 
 
