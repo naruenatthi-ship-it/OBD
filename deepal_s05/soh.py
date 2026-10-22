@@ -16,7 +16,7 @@ from . import predict
 
 MIN_GAIN = 30.0          # % SOC a charge must add to be measured
 MAX_STEP_S = 60.0        # longer gaps are not integrated over
-MIN_COVERAGE = 0.9       # share of the charge time with readings
+MAX_JOIN_S = 12 * 3600   # pieces of one charge may be this far apart
 NOMINAL_CELL_V = 3.2     # LFP
 
 
@@ -27,8 +27,15 @@ def nominal_ah(capacity_kwh, cells=120):
 
 
 def measure(rows):
-    """One charging session (rows with _t, soc, pack_current,
-    pack_voltage) -> dict, or None when it cannot be measured."""
+    """One charge (rows with _t, soc, pack_current, pack_voltage, possibly
+    from several recordings with gaps) -> dict, or None when it cannot be
+    measured.
+
+    The Pi only records while the car is awake and may lose power when the
+    car shuts itself off in the middle of a charge. Only stretches with
+    readings less than MAX_STEP_S apart are used: the charge that went in
+    during such a stretch is divided by the SOC it gained, summed over all
+    stretches. Time with no readings counts for neither side."""
     pts = []
     for r in rows:
         soc = predict.num(r.get("soc"))
@@ -38,29 +45,56 @@ def measure(rows):
         pts.append((r["_t"], soc, i, predict.num(r.get("pack_voltage"))))
     if len(pts) < 10:
         return None
-    soc0, soc1 = pts[0][1], pts[-1][1]
-    gain = soc1 - soc0
-    if gain < MIN_GAIN:
-        return None
-    ah = kwh = covered = 0.0
-    for (t0, _, i0, v0), (t1, _, i1, v1) in zip(pts, pts[1:]):
+    ah = kwh = gain = 0.0
+    blocks, block_start = 0, None
+    for prev, cur in zip(pts, pts[1:]):
+        (t0, s0, i0, v0), (t1, s1, i1, v1) = prev, cur
         dt = (t1 - t0).total_seconds()
-        if dt > MAX_STEP_S:
+        if dt > MAX_STEP_S or dt < 0:
+            block_start = None
             continue
-        covered += dt
+        if block_start is None:
+            block_start, blocks = s0, blocks + 1
         current = -(i0 + i1) / 2  # charging is negative on the S05
         ah += current * dt / 3600
         if v0 is not None and v1 is not None:
             kwh += current * (v0 + v1) / 2 * dt / 3.6e6
-    span = (pts[-1][0] - pts[0][0]).total_seconds()
-    if not span or covered / span < MIN_COVERAGE or ah <= 0:
+        gain += s1 - s0
+    soc0, soc1 = pts[0][1], pts[-1][1]
+    if gain < MIN_GAIN or ah <= 0:
         return None
     peak = max(-i for _, _, i, _ in pts)
     return {"time": pts[-1][0], "soc_start": soc0, "soc_end": soc1,
+            "gain": gain, "blocks": blocks,
             "ah": ah, "kwh": kwh, "capacity_ah": ah / (gain / 100),
             "capacity_kwh": kwh / (gain / 100), "peak_a": peak,
             "kind": "DC" if peak > 40 else "AC",
             "to_full": soc1 >= 99}
+
+
+def charge_events(sessions):
+    """Group the `charge` sessions of predict.sessions into charges: the
+    pieces of one charge are separated by gaps (the car slept or the Pi
+    lost power) but the SOC only rises across them and no drive comes
+    between."""
+    events, cur = [], None
+    for kind, rows in sessions:
+        if kind == "idle":
+            continue
+        if kind != "charge":
+            cur = None
+            continue
+        if cur is not None:
+            gap = (rows[0]["_t"] - cur[-1]["_t"]).total_seconds()
+            before = predict.num(cur[-1].get("soc"))
+            after = predict.num(rows[0].get("soc"))
+            if gap <= MAX_JOIN_S and before is not None and \
+                    after is not None and after >= before - 1:
+                cur.extend(rows)
+                continue
+        cur = list(rows)
+        events.append(cur)
+    return events
 
 
 def charge_rows(folder):
@@ -71,9 +105,7 @@ def charge_rows(folder):
 
 def measurements(folder):
     out = []
-    for kind, s in predict.sessions(charge_rows(folder)):
-        if kind != "charge":
-            continue
+    for s in charge_events(predict.sessions(charge_rows(folder))):
         m = measure(s)
         if m:
             out.append(m)
@@ -107,12 +139,15 @@ def report(folder, capacity_kwh=56.1, cells=120):
     """Text table for the `soh` command."""
     rated = nominal_ah(capacity_kwh, cells)
     ms = measurements(folder)
-    lines = ["%-16s %4s %9s %7s %8s %7s %6s" % (
-        "ชาร์จเสร็จ", "แบบ", "SOC", "Ah เข้า", "ความจุ Ah", "kWh*", "SOH")]
+    lines = ["%-16s %4s %9s %6s %7s %8s %7s %6s" % (
+        "ชาร์จเสร็จ", "แบบ", "SOC", "วัดได้", "Ah เข้า", "ความจุ Ah", "kWh*",
+        "SOH")]
     for m in ms:
-        lines.append("%-16s %4s %4.0f→%-4.0f %7.1f %8.1f %7.1f %5.1f%%%s" % (
-            m["time"].strftime("%Y-%m-%d %H:%M"), m["kind"], m["soc_start"],
-            m["soc_end"], m["ah"], m["capacity_ah"], m["capacity_kwh"],
-            m["capacity_ah"] / rated * 100, " ✓เต็ม" if m["to_full"] else ""))
+        lines.append("%-16s %4s %4.0f→%-4.0f %5.0f%% %7.1f %8.1f %7.1f %5.1f%%%s"
+                     % (m["time"].strftime("%Y-%m-%d %H:%M"), m["kind"],
+                        m["soc_start"], m["soc_end"], m["gain"], m["ah"],
+                        m["capacity_ah"], m["capacity_kwh"],
+                        m["capacity_ah"] / rated * 100,
+                        " ✓เต็ม" if m["to_full"] else ""))
     return ms, rated, "\n".join(lines)
 

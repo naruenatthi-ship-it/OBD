@@ -35,6 +35,44 @@ def test_soh_measure():
     assert soh.nominal_ah(56.1) == pytest.approx(146.1, abs=0.1)
 
 
+def test_soh_measure_skips_gaps():
+    # the Pi lost power twice in the middle of a 16 A charge: the pieces
+    # with readings still give the same capacity as an unbroken charge
+    whole = charge_rows(240, 16, soc0=30, soc_per_min=0.29)
+    gapped = [r for k, r in enumerate(whole)
+              if not (100 <= k < 160 or 300 <= k < 330)]
+    m = soh.measure(gapped)
+    ref = soh.measure(whole)
+    assert m["blocks"] == 3 and m["gain"] < ref["gain"]
+    assert m["capacity_ah"] == pytest.approx(ref["capacity_ah"], rel=0.05)
+
+
+def test_soh_joins_pieces_of_one_charge(tmp_path):
+    # asleep for hours between two recordings of the same charge: one
+    # measurement; a drive in between starts a new one
+    def write(name, rows):
+        with open(tmp_path / name, "w") as f:
+            f.write("time,soc,pack_current,pack_voltage,motor_rpm\n")
+            for r in rows:
+                f.write("%s,%s,%s,%s,0\n" % (
+                    r["_t"].isoformat(), r["soc"], r["pack_current"],
+                    r["pack_voltage"]))
+    a = charge_rows(120, 16, soc0=40, soc_per_min=0.2)
+    b = charge_rows(120, 16, soc0=64, soc_per_min=0.2,
+                    start=T0 + datetime.timedelta(hours=5))
+    write("drive_20261012_2000.csv", a)
+    write("drive_20261013_0100.csv", b)
+    ms = soh.measurements(str(tmp_path))
+    assert len(ms) == 1
+    assert ms[0]["soc_start"] == 40 and ms[0]["gain"] == pytest.approx(48)
+    assert ms[0]["capacity_ah"] == pytest.approx(64 / 0.48, rel=0.02)
+    # a recording where the SOC fell in between is not the same charge
+    c = charge_rows(120, 16, soc0=20, soc_per_min=0.2,
+                    start=T0 + datetime.timedelta(hours=5))
+    write("drive_20261013_0100.csv", c)
+    assert len(soh.measurements(str(tmp_path))) == 0
+
+
 def test_soh_finding_from_files(tmp_path):
     rows = charge_rows(240, 16, soc0=30, soc_per_min=0.29)
     with open(tmp_path / "charge_20261012_2000.csv", "w") as f:
