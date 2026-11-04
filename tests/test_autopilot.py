@@ -48,6 +48,16 @@ class FakeElm:
     def close(self):
         self.closed = True
 
+    # watch DIDs: 780 FD0C answers, 700 F1A8 is refused, the rest silent
+    def read_did(self, header, did):
+        from deepal_s05.elm327 import NegativeResponse, NoData
+        self.watch_reads = getattr(self, "watch_reads", 0) + 1
+        if (header, did) == ("780", 0xFD0C):
+            return bytes([0x01, 0x2C])
+        if (header, did) == ("700", 0xF1A8):
+            raise NegativeResponse(0x22, 0x31)
+        raise NoData("NO DATA")
+
 
 class Clock:
     def __init__(self, t=1_800_000_000.0):
@@ -217,3 +227,36 @@ def test_dashboard_script_keeps_its_helper_names():
     for helper in ("hm", "stat", "f", "esc", "tok", "mix"):
         assert not re.search(r"\bvar\b[^;]*?[\s,]%s\s*=" % helper, script), \
             helper
+
+
+def test_watch_dids_go_into_the_drive_file(tmp_path, monkeypatch):
+    import csv
+    pilot, elm, clock, taken, take = make(tmp_path, [13.9])
+    monkeypatch.setattr(autopilot.snapshot, "take", take)
+    keys = autopilot.load_watch(str(tmp_path))
+    assert ("780", "FD0C") in keys and len(keys) >= 30   # examples/ list
+    for _ in range(len(keys) // autopilot.WATCH_PER_ROUND + 2):
+        pilot.step()
+        clock.t += 5
+    pilot.close_drive_log()
+    path = [f for f in os.listdir(tmp_path) if f.startswith("drive_")][0]
+    with open(tmp_path / path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert "did_780_FD0C" in rows[0] and "did_700_F1BD" in rows[0]
+    assert "012C" in [r["did_780_FD0C"] for r in rows]
+    # each round reads only a few; a refused DID is not asked again
+    assert elm.watch_reads <= len(rows) * autopilot.WATCH_PER_ROUND
+    assert ("700", "F1A8") in pilot.watch.refused
+    # the dashboard does not get the raw hex
+    assert not any(k.startswith("did_") for k in
+                   json.loads(pilot.state.json())["values"])
+
+
+def test_watch_list_from_the_data_folder(tmp_path):
+    (tmp_path / "watch_live.csv").write_text(
+        "header,did\n7a7,fd10\n7A7,FD10\n700,F190\n")
+    assert autopilot.load_watch(str(tmp_path), private={0xF190}) == [
+        ("7A7", "FD10")]
+    pilot = autopilot.Autopilot(lambda: None, [], [], str(tmp_path),
+                                watch=[])
+    assert pilot.watch is None

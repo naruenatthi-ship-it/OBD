@@ -107,8 +107,9 @@ def make_pilot(tmp_path, monkeypatch, volts, values):
     elm.close = lambda: None
     monkeypatch.setattr(autopilot.snapshot, "take", lambda *a, **k: Snapshot(
         clock.t, dict(values)))
+    # watch=[]: these count the survey's own requests
     pilot = autopilot.Autopilot(lambda: elm, [], [], str(tmp_path),
-                                clock=clock)
+                                clock=clock, watch=[])
     pilot.survey.start(["7A1"], [(0, 0xFF)])
     return pilot, elm
 

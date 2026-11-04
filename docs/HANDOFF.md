@@ -42,6 +42,7 @@
   · `obd vps hotspot off` = ไม่ส่งตอนใช้ Hotspot (เริ่มต้น on เพราะ Pi เปิดเฉพาะตอนรถตื่น แทบไม่เคยอยู่บน WiFi บ้าน)
   · สถานะการส่ง + ชื่อ WiFi แสดงบนแถบบนของ dashboard Pi (`.vps_state`, `wifi.current`)
 - (4 พ.ย.) `obd wifi` เขียนใหม่ใน `deepal_s05/wifi.py`: ลำดับ (priority 100/90/...), first/order/use, timer ย้ายไปวงอันดับสูงกว่า (แทน hotspot-first)
+  · autopilot อ่าน watch_live.csv (700/780, 32 DID) รอบละ 8 ตัว ลง drive_ `did_*` → ไม่ต้อง `obd rec` ตอนขับ
   · หน้า `/wifi` บน dashboard Pi (เมนู → WiFi ของ Pi) แก้ได้เฉพาะตอนอยู่บน Hotspot · sudoers ให้ nmcli ไม่ถามรหัส
   · SOH จากการขับ (รวมทริประหว่างชาร์จ, SOC ลด ≥20%, EXPERIMENTAL)
 

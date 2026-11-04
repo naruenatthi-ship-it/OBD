@@ -33,7 +33,7 @@
 - [ ] **I. ลองกับ Honda CR-V e:HEV** ใช้กล่องและ Pi ชุดเดิม (`--car crv-hybrid`)
 
 ## งานเสริม (บันทึกไว้)
-- [ ] autopilot อ่าน `examples/watch_live.csv` (32 DID) เพิ่มทุก ~30 วิ ลง drive_ → ไม่ต้อง `obd rec` และ dashboard ไม่หาย (เจ้าของขอพักไว้ 4 พ.ย.)
+- [x] autopilot อ่าน `examples/watch_live.csv` (32 DID) รอบละ 8 ตัว ลง drive_ (คอลัมน์ `did_<header>_<did>` แบบ rec) ✅ 4 พ.ย. · ใส่ `watch_live.csv` ในโฟลเดอร์ข้อมูลเพื่อเปลี่ยนรายการ
 
 1. ~~คำสั่ง `firstday`~~ → ได้คำสั่งลัด `obd` แทนแล้ว (`obd check`, `obd ecus`, `obd dtc`, `obd scan`)
 2. **สำรองข้อมูลจาก Pi ขึ้น VPS**: เมื่อ Pi ต่อ WiFi บ้านได้ ให้ส่งไฟล์ในโฟลเดอร์ข้อมูลขึ้น VPS
