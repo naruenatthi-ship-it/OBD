@@ -59,6 +59,9 @@ printf '[Journal]\nStorage=volatile\nRuntimeMaxUse=20M\n' | \
 echo "==> อนุญาตให้โปรแกรมสั่งปิดเครื่องเมื่อแบต 12V ต่ำ และหยุด/เปิดบริการโดยไม่ถามรหัส"
 {
     echo "$USER_NAME ALL=(root) NOPASSWD: /sbin/shutdown"
+    # the dashboard's WiFi page (only on the phone hotspot) saves,
+    # ranks and switches networks
+    echo "$USER_NAME ALL=(root) NOPASSWD: $(command -v nmcli || echo /usr/bin/nmcli)"
     for action in start stop restart; do
         echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl $action deepal-obd"
     done

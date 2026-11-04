@@ -29,7 +29,9 @@ class WifiError(Exception):
 def nm(*args, root=False):
     cmd = [NMCLI] + list(args)
     if root and os.geteuid() != 0:
-        cmd = ["sudo"] + cmd
+        # -n: never ask for a password (the dashboard has no terminal);
+        # pi/install.sh lets the Pi's user run nmcli as root
+        cmd = ["sudo", "-n"] + cmd
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -146,46 +148,45 @@ def ip_address():
     return out[0] if out else None
 
 
-# -- commands ---------------------------------------------------------------
-def cmd_list():
-    nets = known()
-    if not nets:
-        print("ยังไม่มี WiFi ที่จำไว้")
-        return 0
+# -- changes, shared by `obd wifi` and the dashboard's /wifi page ---------
+def heard_networks():
     try:
-        heard = in_range()
+        return in_range()
     except WifiError:   # a fresh scan may need root: use the last one
         try:
-            heard = in_range(rescan=False)
+            return in_range(rescan=False)
         except WifiError:
-            heard = {}
-    print("== WiFi ที่จำไว้ (เรียงตามที่ Pi เลือกก่อน) ==")
-    for i, n in enumerate(nets, 1):
-        label = n["name"]
-        if n["ssid"] != n["name"]:
-            label += " (%s)" % n["ssid"]
-        sig = heard.get(n["ssid"])
-        if n["active"]:
-            state = "★ ต่ออยู่" + (" สัญญาณ %d%%" % sig if sig else "")
-        elif sig is not None:
-            state = "อยู่ในระยะ สัญญาณ %d%%" % sig
-        else:
-            state = "ไม่อยู่ในระยะ"
-        print("%2d. %s  · %s" % (i, label, state))
-    if not any(n["active"] for n in nets):
-        print("ตอนนี้ไม่ได้ต่อ WiFi")
-    ip = ip_address()
-    if ip:
-        print("\nIP: %s   dashboard: http://%s:8000" % (ip, ip))
-    print("\nเรียงใหม่: obd wifi first หมายเลข   ย้ายไปวงนี้เดี๋ยวนี้: obd wifi use หมายเลข")
-    return 0
+            return {}
 
 
-def cmd_add(ssid, password, position=None):
+def status():
+    """Everything the /wifi page shows."""
     nets = known()
+    heard = heard_networks()
+    names = {n["ssid"] for n in nets}
+    for n in nets:
+        n["signal"] = heard.get(n["ssid"])
+    nearby = sorted(({"ssid": s, "signal": g} for s, g in heard.items()
+                     if s not in names), key=lambda x: -x["signal"])
+    return {"networks": nets, "nearby": nearby[:15], "ip": ip_address()}
+
+
+def on_hotspot():
+    """True when the Pi is on the phone's hotspot: only the owner's own
+    devices share that network, so the dashboard lets them change the
+    WiFi list there and nowhere else (no password on the dashboard)."""
+    return any(n["active"] and n["name"] == HOTSPOT for n in known())
+
+
+def add_network(ssid, password, position=None):
+    """Save a WPA network at `position` (1 = first; None = last).
+    Returns its position."""
+    ssid = ssid.strip()
+    nets = known()
+    if not ssid:
+        raise WifiError("ใส่ชื่อ WiFi ด้วย")
     if any(n["name"] == ssid or n["ssid"] == ssid for n in nets):
-        raise WifiError('จำ "%s" ไว้แล้ว ลบก่อนถ้าจะเปลี่ยนรหัส:'
-                        ' obd wifi remove "%s"' % (ssid, ssid))
+        raise WifiError('จำ "%s" ไว้แล้ว ลบก่อนถ้าจะเปลี่ยนรหัส' % ssid)
     if len(password) < 8:
         raise WifiError("รหัส WiFi ต้องยาวอย่างน้อย 8 ตัว")
     nm("connection", "add", "type", "wifi", "ifname", "wlan0",
@@ -197,19 +198,82 @@ def cmd_add(ssid, password, position=None):
                                                         len(nets)))
     nets.insert(pos, new)
     set_order(nets)
-    print('เพิ่ม "%s" แล้ว อยู่ลำดับที่ %d' % (ssid, pos + 1))
+    return pos + 1
+
+
+def remove_network(key):
+    n = find(known(), key)
+    if n["name"] == HOTSPOT:
+        raise WifiError("ไม่ลบ Hotspot มือถือ: เป็นทางกู้เวลาหา Pi ไม่เจอ"
+                        " (ถ้าเปลี่ยนชื่อ Hotspot ให้รัน obd pair ใหม่)")
+    nm("connection", "delete", n["name"], root=True)
+    return n
+
+
+def reorder(keys):
+    """Put these networks first, in this order; the rest keep theirs."""
+    nets = known()
+    picked = []
+    for k in keys:
+        n = find(nets, k)
+        if n not in picked:
+            picked.append(n)
+    new = picked + [n for n in nets if n not in picked]
+    set_order(new)
+    return new
+
+
+def use_network(key):
+    n = find(known(), key)
+    if not n["active"]:
+        nm("connection", "up", n["name"], root=True)
+    return n
+
+
+HOTSPOT_NOT_FIRST = ("Hotspot มือถือไม่ได้อยู่อันดับ 1 แล้ว: ถ้าวงที่อยู่เหนือกว่าอยู่ในระยะ"
+                     " Pi จะไม่ย้ายมา Hotspot เอง (มือถือต้องอยู่ WiFi วงเดียวกับ Pi"
+                     " ถึงจะเปิด dashboard ได้)")
+
+
+# -- commands ---------------------------------------------------------------
+def cmd_list():
+    st = status()
+    nets = st["networks"]
+    if not nets:
+        print("ยังไม่มี WiFi ที่จำไว้")
+        return 0
+    print("== WiFi ที่จำไว้ (เรียงตามที่ Pi เลือกก่อน) ==")
+    for i, n in enumerate(nets, 1):
+        label = n["name"]
+        if n["ssid"] != n["name"]:
+            label += " (%s)" % n["ssid"]
+        sig = n["signal"]
+        if n["active"]:
+            state = "★ ต่ออยู่" + (" สัญญาณ %d%%" % sig if sig else "")
+        elif sig is not None:
+            state = "อยู่ในระยะ สัญญาณ %d%%" % sig
+        else:
+            state = "ไม่อยู่ในระยะ"
+        print("%2d. %s  · %s" % (i, label, state))
+    if not any(n["active"] for n in nets):
+        print("ตอนนี้ไม่ได้ต่อ WiFi")
+    if st["ip"]:
+        print("\nIP: %s   dashboard: http://%s:8000" % (st["ip"], st["ip"]))
+    print("\nเรียงใหม่: obd wifi first หมายเลข   ย้ายไปวงนี้เดี๋ยวนี้: obd wifi use หมายเลข")
+    print("(จัดการบนหน้า dashboard ได้ด้วย: เมนู → WiFi ของ Pi)")
+    return 0
+
+
+def cmd_add(ssid, password, position=None):
+    pos = add_network(ssid, password, position)
+    print('เพิ่ม "%s" แล้ว อยู่ลำดับที่ %d' % (ssid, pos))
     print("ระวัง: WiFi ที่ทำงาน/ร้านค้ามักกันไม่ให้มือถือมองเห็น Pi")
     print("ถ้าหา Pi ไม่เจอ เปิด Hotspot มือถือ Pi จะย้ายกลับมาเองใน 1-2 นาที")
     return cmd_list()
 
 
 def cmd_remove(key):
-    nets = known()
-    n = find(nets, key)
-    if n["name"] == HOTSPOT:
-        raise WifiError("ไม่ลบ Hotspot มือถือ: เป็นทางกู้เวลาหา Pi ไม่เจอ"
-                        " (ถ้าเปลี่ยนชื่อ Hotspot ให้รัน obd pair ใหม่)")
-    nm("connection", "delete", n["name"], root=True)
+    n = remove_network(key)
     print('ลบ "%s" แล้ว' % n["name"])
     if n["active"]:
         print("Pi กำลังหา WiFi วงอื่นที่จำไว้ (ถ้าหลุดจาก Termius ให้เปิด Hotspot)")
@@ -217,18 +281,9 @@ def cmd_remove(key):
 
 
 def cmd_order(keys):
-    nets = known()
-    picked = []
-    for k in keys:
-        n = find(nets, k)
-        if n not in picked:
-            picked.append(n)
-    rest = [n for n in nets if n not in picked]
-    set_order(picked + rest)
-    top = (picked + rest)[0]
-    if top["name"] != HOTSPOT:
-        print("หมายเหตุ: Hotspot มือถือไม่ได้อยู่อันดับ 1 แล้ว ถ้าวงที่อยู่เหนือกว่าอยู่ในระยะ"
-              " Pi จะไม่ย้ายมา Hotspot เอง (มือถือต้องอยู่ WiFi วงเดียวกับ Pi ถึงจะเห็น)")
+    new = reorder(keys)
+    if new[0]["name"] != HOTSPOT:
+        print("หมายเหตุ: " + HOTSPOT_NOT_FIRST)
     return cmd_list()
 
 
@@ -243,7 +298,7 @@ def cmd_use(key):
           " ใช้ obd wifi first แทนถ้าจะให้อยู่ถาวร)")
     sys.stdout.flush()
     time.sleep(1)   # let the message reach Termius before the link drops
-    nm("connection", "up", n["name"], root=True)
+    use_network(key)
     return 0
 
 

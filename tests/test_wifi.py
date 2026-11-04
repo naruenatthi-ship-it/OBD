@@ -141,3 +141,80 @@ def test_dashboard_wifi_info_is_cached(monkeypatch):
     t[0] = 31
     info.get()
     assert len(calls) == 2
+
+
+def serve_local(tmp_path):
+    import threading
+    from deepal_s05 import autopilot, dashboard
+    server = dashboard.make_server(autopilot.State([], []), "127.0.0.1", 0,
+                                   str(tmp_path), local=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, "http://127.0.0.1:%d" % server.server_address[1]
+
+
+def post(base, body, header=True):
+    import urllib.request
+    req = urllib.request.Request(
+        base + "/wifi", json.dumps(body).encode(),
+        {"Content-Type": "application/json"} |
+        ({"X-Requested-With": "deepal"} if header else {}))
+    return json.loads(urllib.request.urlopen(req).read())
+
+
+def test_dashboard_wifi_page(nm, tmp_path, monkeypatch):
+    import urllib.error
+    import urllib.request
+    monkeypatch.setattr(wifi.time, "sleep", lambda s: None)
+    setup, read = nm
+    setup(DEFAULT, "hotspot", {HOTSPOT_SSID: 80, "Office": 40, "Cafe": 60})
+    server, base = serve_local(tmp_path)
+    try:
+        assert "WiFi ของ Pi" in urllib.request.urlopen(base + "/wifi").read() \
+            .decode()
+        assert "/wifi" in urllib.request.urlopen(base + "/tools").read() \
+            .decode()
+        d = json.loads(urllib.request.urlopen(base + "/wifi.json").read())
+        assert d["editable"] and d["networks"][0]["signal"] == 80
+        assert [x["ssid"] for x in d["nearby"]] == ["Cafe"]
+        # without the custom header (another web page posting): refused
+        with pytest.raises(urllib.error.HTTPError):
+            post(base, {"action": "remove", "name": "Office"}, header=False)
+        r = post(base, {"action": "add", "ssid": "Cafe",
+                        "password": "password1", "position": 1})
+        assert "ลำดับที่ 1" in r["message"]
+        assert r["status"]["networks"][0]["name"] == "Cafe"
+        r = post(base, {"action": "order",
+                        "names": ["hotspot", "Cafe", "Home:5G", "Office"]})
+        assert "Hotspot" not in r["message"]
+        assert "error" in post(base, {"action": "remove", "name": "hotspot"})
+        assert "ลบ" in post(base, {"action": "remove", "name": "Office"})[
+            "message"]
+        # on another WiFi: look only
+        st = read()
+        setup(st["nets"], "Home:5G", st["air"])
+        d = json.loads(urllib.request.urlopen(base + "/wifi.json").read())
+        assert not d["editable"] and "Hotspot" in d["reason"]
+        assert "error" in post(base, {"action": "remove", "name": "Cafe"})
+        assert "Cafe" in read()["nets"]
+    finally:
+        server.shutdown()
+
+
+def test_vps_copy_has_no_wifi_page(tmp_path):
+    import threading
+    import urllib.error
+    import urllib.request
+    from deepal_s05 import autopilot, dashboard
+    server = dashboard.make_server(autopilot.State([], []), "127.0.0.1", 0,
+                                   str(tmp_path))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % server.server_address[1]
+    try:
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(base + "/wifi")
+        with pytest.raises(urllib.error.HTTPError):
+            post(base, {"action": "remove", "name": "x"})
+        assert "/wifi" not in urllib.request.urlopen(base + "/tools").read() \
+            .decode()
+    finally:
+        server.shutdown()

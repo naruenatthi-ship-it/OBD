@@ -132,7 +132,7 @@ ssh เข้า Pi แล้วพิมพ์ **`obd`** จะขึ้นเ�
 | `obd scan 7A7 0100-01FF` | สแกน DID ของกล่องที่ต้องการ |
 | `obd live` | ดูค่าสดในหน้าจอ |
 | `obd bg <คำสั่ง>` | สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น `obd bg scan 7A4,742 0100-EFFF` · `obd log` ดูความคืบหน้า · `obd stop` หยุด |
-| `obd wifi` | ดูว่าต่อวงไหนอยู่ + ลำดับ · `obd wifi add "ชื่อ" "รหัส" [ลำดับ]` เพิ่ม · `obd wifi first 2` / `obd wifi order 2 1 3` เรียงใหม่ (Pi ย้ายไปวงที่อันดับสูงกว่าเองภายใน 1–2 นาที) · `obd wifi use 2` ย้ายเดี๋ยวนี้ · `obd wifi remove 2` ลบ (ไม่ลบ hotspot) |
+| `obd wifi` | ดูว่าต่อวงไหนอยู่ + ลำดับ · `obd wifi add "ชื่อ" "รหัส" [ลำดับ]` เพิ่ม · `obd wifi first 2` / `obd wifi order 2 1 3` เรียงใหม่ (Pi ย้ายไปวงที่อันดับสูงกว่าเองภายใน 1–2 นาที) · `obd wifi use 2` ย้ายเดี๋ยวนี้ · `obd wifi remove 2` ลบ (ไม่ลบ hotspot) · ทำบนหน้า dashboard ได้: เมนู → WiFi ของ Pi (แก้ได้ตอนต่อ Hotspot) |
 | `obd telegram TOKEN` | ตั้งแจ้งเตือนเข้า Telegram (token จาก @BotFather ส่งข้อความหาบอทก่อน 1 ข้อความ) · `obd telegram` เฉยๆ ส่งข้อความทดสอบ |
 | `obd show [คำค้น]` | แสดงไฟล์ผลในจอ ใช้ตอนหน้า `/files` เปิดไม่ได้ (ระหว่าง `obd bg`/`obd rec` หน้าเว็บปิดอยู่) เช่น `obd show 7A4` |
 | `obd topo` | หากล่อง ECU + อ่านโค้ด แล้วเปิดแผนผังทั้งคันที่ `/topology` |

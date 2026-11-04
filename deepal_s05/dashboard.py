@@ -149,9 +149,14 @@ TOOLS = (
 )
 
 
-def tools_page():
+WIFI_TOOL = ("ตั้งค่า", (
+    ("/wifi", "wifi", "WiFi ของ Pi", "ต่อวงไหนอยู่ เพิ่ม ลบ เรียงลำดับ",
+     "#2f6fdb"),))
+
+
+def tools_page(local=False):
     parts = []
-    for section, tiles in TOOLS:
+    for section, tiles in TOOLS + ((WIFI_TOOL,) if local else ()):
         parts.append('<div class="label">%s</div><div class="tiles">' % section)
         for href, ic, title, sub, color in tiles:
             parts.append(
@@ -335,6 +340,161 @@ class WifiInfo:
         return self.value
 
 
+WIFI_CSS = """
+.wtop { display:flex; gap:10px; align-items:center; }
+.wtop .tx { flex:1; min-width:0; }
+.wtop b { display:block; font-size:1.05rem; overflow-wrap:anywhere; }
+.wnum { flex:none; width:28px; height:28px; border-radius:50%; display:grid;
+  place-items:center; font-weight:700; font-size:.85rem;
+  background:var(--accent-soft); color:var(--accent); }
+.wnet { flex-wrap:wrap; }
+.wnet .tx small.on { color:var(--ok); font-weight:700; }
+.wacts { display:flex; gap:6px; flex-wrap:wrap; width:100%; padding-left:40px; }
+.wb { min-height:38px; padding:6px 12px; border-radius:10px; font-size:.84rem; }
+.wb.bad { color:var(--bad); }
+.wform { display:grid; gap:10px; }
+.wform input, .wform select { width:100%; min-height:46px; padding:10px 12px;
+  border-radius:12px; border:1px solid var(--line); background:var(--bg);
+  color:var(--ink); font:inherit; font-size:16px; box-sizing:border-box; }
+.wmsg { padding:12px 14px; border-radius:12px; background:var(--warnbg);
+  color:var(--ink); font-size:.88rem; }
+.wmsg.ok { background:var(--okbg); }
+.wmsg.bad { background:var(--badbg); }
+.wmsg:empty { display:none; }
+"""
+
+WIFI_BODY = r"""
+<div class="card wtop"><span class="tx"><small class="muted">ตอนนี้ต่ออยู่</small>
+<b id="cur">กำลังอ่าน...</b><small class="muted" id="ip"></small></span>
+<button class="btn plain wb" id="reload" type="button">รีเฟรช</button></div>
+<div class="wmsg" id="msg" role="status"></div>
+<div class="label">WiFi ที่จำไว้ · Pi เลือกจากบนลงล่าง</div>
+<div class="list" id="nets"></div>
+<p class="muted">Pi ย้ายไปวงที่อยู่สูงกว่าเองเมื่ออยู่ในระยะ (ภายใน 1–2 นาที)
+ควรให้ Hotspot มือถืออยู่อันดับ 1 ไว้ เป็นทางกู้เวลาหา Pi ไม่เจอ</p>
+<div class="label">เพิ่ม WiFi</div>
+<form class="card wform" id="add" autocomplete="off">
+<input id="ssid" list="nearby" placeholder="ชื่อ WiFi" autocapitalize="off" required>
+<datalist id="nearby"></datalist>
+<input id="pw" type="password" placeholder="รหัส WiFi (8 ตัวขึ้นไป)" required>
+<select id="pos"></select>
+<button class="btn" type="submit">เพิ่ม WiFi</button>
+<small class="muted">WiFi ที่ทำงาน/ร้านค้ามักกันไม่ให้มือถือมองเห็น Pi ถ้าหา Pi ไม่เจอ
+ให้เปิด Hotspot มือถือ Pi จะย้ายกลับมาเอง</small>
+</form>
+<script>
+var st = null, busy = false;
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function say(text, kind) { var m = document.getElementById('msg'); m.textContent = text || ''; m.className = 'wmsg' + (kind ? ' ' + kind : ''); }
+function load() {
+  fetch('/wifi.json', {cache:'no-store'}).then(function(r){ return r.json(); }).then(render)
+    .catch(function(){ say('ติดต่อ Pi ไม่ได้', 'bad'); });
+}
+function render(d) {
+  st = d;
+  var cur = d.networks.filter(function(n){ return n.active; })[0];
+  document.getElementById('cur').textContent = cur ? cur.ssid + (cur.signal ? ' · สัญญาณ ' + cur.signal + '%' : '') : 'ไม่ได้ต่อ WiFi';
+  document.getElementById('ip').textContent = d.ip ? 'IP ' + d.ip : '';
+  if (!d.editable) say(d.reason, '');
+  var n = d.networks.length, dis = d.editable ? '' : ' disabled';
+  document.getElementById('nets').innerHTML = d.networks.map(function(w, i){
+    var state = w.active ? '<small class="on">★ ต่ออยู่' + (w.signal ? ' · สัญญาณ ' + w.signal + '%' : '') + '</small>'
+      : '<small>' + (w.signal != null ? 'อยู่ในระยะ · สัญญาณ ' + w.signal + '%' : 'ไม่อยู่ในระยะ') + '</small>';
+    var name = esc(w.ssid) + (w.name !== w.ssid ? ' <span class="muted">(' + esc(w.name) + ')</span>' : '');
+    return '<div class="item wnet"><span class="wnum">' + (i+1) + '</span><span class="tx"><b>' + name + '</b>' + state + '</span>' +
+      '<div class="wacts">' +
+      (i > 0 ? '<button class="btn plain wb" data-up="' + i + '"' + dis + '>▲ ขึ้น</button>' : '') +
+      (i < n-1 ? '<button class="btn plain wb" data-down="' + i + '"' + dis + '>▼ ลง</button>' : '') +
+      (!w.active && w.signal != null ? '<button class="btn tonal wb" data-use="' + i + '"' + dis + '>ย้ายไปวงนี้</button>' : '') +
+      (w.name !== 'hotspot' ? '<button class="btn plain wb bad" data-del="' + i + '"' + dis + '>ลบ</button>' : '') +
+      '</div></div>';
+  }).join('') || '<div class="item"><span class="tx">ยังไม่มี WiFi ที่จำไว้</span></div>';
+  document.getElementById('nearby').innerHTML = d.nearby.map(function(x){ return '<option value="' + esc(x.ssid) + '">สัญญาณ ' + x.signal + '%</option>'; }).join('');
+  var pos = '';
+  for (var k = 1; k <= n + 1; k++) pos += '<option value="' + k + '"' + (k === n+1 ? ' selected' : '') + '>ลำดับที่ ' + k + (k === n+1 ? ' (ท้ายสุด)' : '') + '</option>';
+  document.getElementById('pos').innerHTML = pos;
+  document.querySelectorAll('#add input, #add select, #add button').forEach(function(e){ e.disabled = !d.editable; });
+}
+function act(body, note) {
+  if (busy) return; busy = true; say(note || 'กำลังทำ...', '');
+  fetch('/wifi', {method:'POST', headers:{'Content-Type':'application/json', 'X-Requested-With':'deepal'}, body:JSON.stringify(body)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ busy = false; if (d.error) { say(d.error, 'bad'); return; } say(d.message || 'เรียบร้อย', 'ok'); if (d.status) render(d.status); })
+    .catch(function(){ busy = false; say('ติดต่อ Pi ไม่ได้ (ถ้าเพิ่งสั่งย้ายวง ให้มือถือไปอยู่วงใหม่แล้วเปิดหน้านี้ใหม่)', 'bad'); });
+}
+function names() { return st.networks.map(function(w){ return w.name; }); }
+document.getElementById('nets').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b || !st) return;
+  var l = names(), i;
+  if (b.dataset.up) { i = +b.dataset.up; l.splice(i-1, 0, l.splice(i, 1)[0]); act({action:'order', names:l}); }
+  else if (b.dataset.down) { i = +b.dataset.down; l.splice(i+1, 0, l.splice(i, 1)[0]); act({action:'order', names:l}); }
+  else if (b.dataset.use) { var w = st.networks[+b.dataset.use];
+    if (confirm('ย้าย Pi ไป "' + w.ssid + '" ?\nมือถือต้องไปอยู่วงเดียวกันถึงจะเปิดหน้านี้ได้อีก')) act({action:'use', name:w.name}, 'กำลังย้าย...'); }
+  else if (b.dataset.del) { var x = st.networks[+b.dataset.del];
+    if (confirm('ลบ "' + x.ssid + '" ?')) act({action:'remove', name:x.name}); }
+});
+document.getElementById('add').addEventListener('submit', function(e){
+  e.preventDefault();
+  act({action:'add', ssid:document.getElementById('ssid').value, password:document.getElementById('pw').value, position:+document.getElementById('pos').value});
+  document.getElementById('pw').value = '';
+});
+document.getElementById('reload').addEventListener('click', function(){ say('', ''); load(); });
+load();
+</script>
+"""
+
+
+def wifi_status():
+    """/wifi.json: the networks, and whether this page may change them."""
+    from . import wifi
+    try:
+        d = wifi.status()
+        d["editable"] = any(n["active"] and n["name"] == wifi.HOTSPOT
+                            for n in d["networks"])
+    except wifi.WifiError as e:
+        return {"networks": [], "nearby": [], "ip": None, "editable": False,
+                "reason": "อ่าน WiFi ไม่ได้: %s" % e}
+    d["reason"] = "" if d["editable"] else (
+        "แก้ได้เฉพาะตอน Pi ต่อ Hotspot มือถือ (หน้านี้ไม่มีรหัสผ่าน: กันคนอื่นใน"
+        " WiFi วงเดียวกันมาแก้) · ดูได้อย่างเดียว")
+    return d
+
+
+def wifi_change(req, run_later=None):
+    """POST /wifi -> (reply dict). `run_later(fn)` runs a move to another
+    network after the reply is sent: the phone loses the Pi right then."""
+    from . import wifi
+    action = req.get("action")
+    try:
+        if not wifi.on_hotspot():
+            return {"error": "แก้ได้เฉพาะตอน Pi ต่อ Hotspot มือถือ"}
+        if action == "add":
+            pos = wifi.add_network(str(req.get("ssid", "")),
+                                   str(req.get("password", "")),
+                                   int(req.get("position") or 0) or None)
+            msg = 'เพิ่ม "%s" แล้ว อยู่ลำดับที่ %d' % (req.get("ssid"), pos)
+        elif action == "remove":
+            n = wifi.remove_network(str(req.get("name", "")))
+            msg = 'ลบ "%s" แล้ว' % n["ssid"]
+        elif action == "order":
+            new = wifi.reorder([str(x) for x in req.get("names") or []])
+            msg = "เรียงลำดับใหม่แล้ว" + (
+                "" if new[0]["name"] == wifi.HOTSPOT
+                else " · " + wifi.HOTSPOT_NOT_FIRST)
+        elif action == "use":
+            n = wifi.find(wifi.known(), str(req.get("name", "")))
+            (run_later or (lambda fn: fn()))(
+                lambda: wifi.use_network(n["name"]))
+            return {"message": 'กำลังย้าย Pi ไป "%s" · ให้มือถือไปอยู่วงเดียวกัน'
+                    ' แล้วเปิดหน้านี้ใหม่ (ถ้าวงอื่นอยู่สูงกว่าและอยู่ในระยะ Pi'
+                    ' จะย้ายกลับเอง: ใช้ ▲ แทนถ้าจะให้อยู่ถาวร)' % n["ssid"]}
+        else:
+            return {"error": "ไม่รู้จักคำสั่ง"}
+    except (wifi.WifiError, ValueError, TypeError) as e:
+        return {"error": str(e)}
+    return {"message": msg, "status": wifi_status()}
+
+
 def read_cell_ir(path):
     """The last per-cell IR measurement saved by `health --cell-ir`."""
     if not path:
@@ -481,6 +641,37 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
             self.end_headers()
             return False
 
+        def do_POST(self):
+            path = urllib.parse.urlparse(self.path).path
+            if not self.authorized():
+                return
+            # a custom header makes a browser ask first (CORS preflight),
+            # so another web page cannot post here behind the owner's back
+            if not local or path != "/wifi" or \
+                    self.headers.get("X-Requested-With") != "deepal":
+                self.send_error(404)
+                return
+            try:
+                size = min(int(self.headers.get("Content-Length") or 0), 4096)
+                req = json.loads(self.rfile.read(size) or b"{}")
+            except ValueError:
+                req = {}
+            if not isinstance(req, dict):
+                req = {}
+
+            def later(fn):
+                def go():
+                    import time
+                    time.sleep(1.5)
+                    try:
+                        fn()
+                    except Exception:
+                        traceback.print_exc()
+                threading.Thread(target=go, daemon=True).start()
+            reply = wifi_change(req, later)
+            self.send_body(json.dumps(reply, ensure_ascii=False)
+                           .encode("utf-8"), "application/json; charset=utf-8")
+
         def do_GET(self):
             path = urllib.parse.urlparse(self.path).path
             if path not in PUBLIC and not self.authorized():
@@ -515,7 +706,15 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                     icon.append(ui.icon_png())
                 self.send_body(icon[0], "image/png")
             elif data_dir and path == "/tools":
-                self.html(tools_page())
+                self.html(tools_page(local))
+            elif local and path == "/wifi":
+                self.html(ui.shell("WiFi ของ Pi", WIFI_BODY, back="/tools",
+                                   active="tools", css=WIFI_CSS,
+                                   sub="ดู เพิ่ม ลบ และเรียงลำดับ"))
+            elif local and path == "/wifi.json":
+                self.send_body(json.dumps(wifi_status(), ensure_ascii=False)
+                               .encode("utf-8"),
+                               "application/json; charset=utf-8")
             elif data_dir and path == "/digest":
                 from . import survey
                 query = urllib.parse.urlparse(self.path).query
