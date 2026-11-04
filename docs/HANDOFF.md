@@ -40,7 +40,9 @@
 
 - (4 พ.ย.) ส่งขึ้น VPS ทันทีที่ WiFi ต่อได้ (NetworkManager dispatcher → `obd vps auto`, ลอง 3 ครั้ง) + ทุก 15 นาที
   · `obd vps hotspot off` = ไม่ส่งตอนใช้ Hotspot (เริ่มต้น on เพราะ Pi เปิดเฉพาะตอนรถตื่น แทบไม่เคยอยู่บน WiFi บ้าน)
-  · สถานะการส่งแสดงบนแถบบนของ dashboard Pi (`.vps_state`) · SOH จากการขับ (รวมทริประหว่างชาร์จ, SOC ลด ≥20%, EXPERIMENTAL)
+  · สถานะการส่ง + ชื่อ WiFi แสดงบนแถบบนของ dashboard Pi (`.vps_state`, `wifi.current`)
+- (4 พ.ย.) `obd wifi` เขียนใหม่ใน `deepal_s05/wifi.py`: ลำดับ (priority 100/90/...), first/order/use, timer ย้ายไปวงอันดับสูงกว่า (แทน hotspot-first)
+  · SOH จากการขับ (รวมทริประหว่างชาร์จ, SOC ลด ≥20%, EXPERIMENTAL)
 
 - `deepal-hotspot.timer`, `obd wifi add/remove`, `obd off/reboot/bg/log`, `obd freeze` (19 04), `obd show/clean`
 - หน้า `/topology`, `/dyno`, `/charge`, `/freeze`, `/health` (predict), `/cost` · `obd soh`, `obd canscan/cancompare`

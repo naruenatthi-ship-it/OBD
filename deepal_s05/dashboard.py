@@ -312,6 +312,29 @@ def vps_state(data_dir):
     return {"state": parts[0], "time": parts[1].strip()}
 
 
+class WifiInfo:
+    """The WiFi the Pi is on, for the status line; asked of NetworkManager
+    at most every `ttl` seconds (the page polls every 2 s)."""
+
+    def __init__(self, ttl=30.0, clock=None):
+        import time
+        self.ttl, self.clock = ttl, clock or time.monotonic
+        self.when, self.value = None, None
+
+    def get(self):
+        now = self.clock()
+        if self.when is None or now - self.when >= self.ttl:
+            from . import wifi
+            try:
+                cur = wifi.current()
+            except Exception:  # no NetworkManager: show nothing
+                cur = None
+            self.value = None if cur is None else {
+                "name": cur[1], "signal": cur[2]}
+            self.when = now
+        return self.value
+
+
 def read_cell_ir(path):
     """The last per-cell IR measurement saved by `health --cell-ir`."""
     if not path:
@@ -413,16 +436,18 @@ PUBLIC = ICON_PATHS + ("/manifest.webmanifest",)
 
 def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 car_name="Deepal S05", ir_path=None, car_key="deepal-s05",
-                password=None):
+                password=None, local=False):
     """`poller` only needs a json() method. With `data_dir`, /files lists
     and serves the data files and /trends draws the trend charts. /ir
     serves the per-cell IR file at `ir_path` (default: in data_dir).
     With `password`, every page asks for it (HTTP basic auth, any user
-    name) - for a copy on a server reachable from the internet."""
+    name) - for a copy on a server reachable from the internet. `local`
+    (the Pi's own dashboard) adds the WiFi it is on to /data."""
     import base64
     import hmac
     page = PAGE.replace("Deepal S05", html.escape(car_name))
     icon = []  # drawn on the first request, then kept
+    wifi_info = WifiInfo() if local else None
     if ir_path is None and data_dir:
         ir_path = os.path.join(data_dir, CELL_IR_FILE)
 
@@ -462,10 +487,16 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 return
             if path.startswith("/data"):
                 body = poller.json()
+                extra = {}
                 sync = vps_state(data_dir) if data_dir else None
                 if sync:
+                    extra["vps"] = sync
+                net = wifi_info.get() if wifi_info else None
+                if net:
+                    extra["wifi"] = net
+                if extra:
                     d = json.loads(body)
-                    d["vps"] = sync
+                    d.update(extra)
                     body = json.dumps(d, ensure_ascii=False)
                 self.send_body(body.encode("utf-8"),
                                "application/json; charset=utf-8")
@@ -798,12 +829,13 @@ function render(d) {
     st.className = stale && !d.status ? 'err' : '';
     if (!stale) chip('live', 'สด'); else if (d.status) chip('', 'ล่าสุด'); else chip('err', 'ข้อมูลเก่า');
   }
-  var v = d.vps, hm = v ? v.time.slice(11, 16) : '';
-  document.getElementById('sync').textContent = !v ? '' :
+  var v = d.vps, hm = v ? v.time.slice(11, 16) : '', w = d.wifi;
+  document.getElementById('sync').textContent = (w ? ' · WiFi ' + w.name +
+    (w.signal ? ' ' + w.signal + '%' : '') : '') + (!v ? '' :
     v.state === 'ok' ? ' · ส่งขึ้นเซิร์ฟเวอร์ครบแล้ว ' + hm :
     v.state === 'syncing' ? ' · กำลังส่งข้อมูลขึ้นเซิร์ฟเวอร์...' :
     v.state === 'skip' ? ' · ไม่ส่งขึ้นเซิร์ฟเวอร์ตอนใช้ Hotspot' :
-    ' · ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ ' + hm + ' (จะลองใหม่เอง)';
+    ' · ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ ' + hm + ' (จะลองใหม่เอง)');
   document.getElementById('tabbar').hidden = !d.files;
   document.getElementById('alerts').innerHTML = (d.alerts||[]).map(function(a){
     return '<div class="alert'+(a.level>=3?' crit':'')+'">'+esc(a.text)+'</div>';

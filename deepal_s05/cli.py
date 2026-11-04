@@ -1159,7 +1159,7 @@ def cmd_autopilot(args):
         private=PRIVATE_DIDS)
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
                                    data_dir, car_name=args.vehicle.name,
-                                   car_key=args.car)
+                                   car_key=args.car, local=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("autopilot: เก็บข้อมูลที่ %s  หน้าจอ http://<IP>:%d" % (
         data_dir, args.http_port))

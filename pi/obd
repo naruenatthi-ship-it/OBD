@@ -46,9 +46,12 @@ usage() {
   log              ดูความคืบหน้าของงานเบื้องหลังล่าสุด
   show [คำค้น]      แสดงไฟล์ผลในจอ (ใช้ตอนหน้า /files เปิดไม่ได้) เช่น obd show 7A4
                    ไม่ใส่คำค้น = ไฟล์ scan ล่าสุด
-  wifi             ดู WiFi ที่จำไว้และที่ต่ออยู่
-  wifi add "ชื่อWiFi" "รหัส"  เพิ่ม WiFi สำรอง (เปิด Hotspot เมื่อไหร่ Pi ย้ายกลับมาเอง)
-  wifi remove "ชื่อWiFi"     ลบ WiFi ที่จำไว้
+  wifi             ดูว่าต่อ WiFi วงไหนอยู่ + ลำดับที่ Pi เลือกก่อน
+  wifi add "ชื่อWiFi" "รหัส" [ลำดับ]  เพิ่ม WiFi (ไม่ใส่ลำดับ = ต่อท้าย)
+  wifi first หมายเลข    ย้ายวงนี้ขึ้นอันดับ 1 (Pi ย้ายไปเองเมื่ออยู่ในระยะ)
+  wifi order 2 1 3      เรียงลำดับใหม่ทั้งหมด
+  wifi use หมายเลข      ย้ายไปวงนี้เดี๋ยวนี้
+  wifi remove หมายเลข   ลบ WiFi ที่จำไว้
   vps setup ผู้ใช้@เครื่อง [พอร์ตเว็บ]  ตั้งให้ส่งข้อมูลขึ้น VPS ทุก 15 นาที ดูรถจากที่ไหนก็ได้
   vps sync / vps   ส่งข้อมูลขึ้น VPS เดี๋ยวนี้ / ดูสถานะ (ปกติส่งเองทันทีที่ต่อเน็ตได้)
   vps hotspot on|off  ส่งตอนใช้ Hotspot มือถือด้วยไหม (เริ่มต้น on)
@@ -381,35 +384,7 @@ do_command() {
             do_command "$@"
             echo "== เสร็จแล้ว ==" ;;
         wifi)
-            local action=${1:-list}
-            case "$action" in
-                add)
-                    if [ $# -lt 3 ]; then
-                        echo 'ใช้แบบนี้: obd wifi add "ชื่อWiFi" "รหัส"'
-                        return 1
-                    fi
-                    # Hotspot first (10), home/extra networks after (5):
-                    # with two known networks in range NetworkManager keeps
-                    # whichever it joined, so the phone could lose the Pi
-                    as_root nmcli connection add type wifi ifname wlan0 \
-                        con-name "$2" ssid "$2" wifi-sec.key-mgmt wpa-psk \
-                        wifi-sec.psk "$3" connection.autoconnect-priority 5 &&
-                    as_root nmcli connection modify hotspot \
-                        connection.autoconnect-priority 10 2>/dev/null
-                    echo "เพิ่ม $2 แล้ว เปิด Hotspot เมื่อไหร่ Pi จะย้ายกลับมาภายใน 1-2 นาที"
-                    echo "ระวัง: WiFi ที่ทำงาน/ร้านค้ามักกันไม่ให้มือถือมองเห็น Pi"
-                    echo "และถ้ารถดับเอง Pi ก็ดับ (งานเบื้องหลังหยุดด้วย)" ;;
-                remove|delete)
-                    as_root nmcli connection delete "${2:-}" ;;
-                *)
-                    echo "== WiFi ที่จำไว้ (ตัวเลขมาก = เลือกก่อน) =="
-                    nmcli -f NAME,TYPE,AUTOCONNECT-PRIORITY connection show |
-                        grep -E "wifi|NAME"
-                    echo "== ตอนนี้ต่ออยู่ =="
-                    nmcli -t -f NAME,DEVICE connection show --active |
-                        grep wlan0 || echo "(ไม่ได้ต่อ)"
-                    web ;;
-            esac ;;
+            PYTHONPATH="$APP" python3 -m deepal_s05.wifi "$@" ;;
         log)
             local last
             last=$(ls -t "$DATA"/bg_*.log "$DATA"/rec_*.log 2>/dev/null | head -1)
@@ -535,7 +510,7 @@ menu() {
                  "survey  สถานะการสำรวจ DID" "cost  ค่าไฟการชาร์จ" "vps  สถานะ VPS" "clean  ลบไฟล์ที่ไม่จำเป็น"
                  "rec  บันทึกระหว่างขับ 20 นาที (เบื้องหลัง)" "stop  หยุดการบันทึก"
                  "trip  สรุปทริป (km, kWh/100 km)" "log  ดูงานเบื้องหลัง"
-                 "wifi  ดู WiFi ที่จำไว้" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"
+                 "wifi  ดู/เรียง WiFi" "off  ปิดเครื่อง Pi" "reboot  รีสตาร์ท Pi"
                  "status  สถานะโหมดอัตโนมัติ" "web  ที่อยู่หน้า dashboard"
                  "update  อัปเดตโปรแกรม" "pair  จับคู่กล่องใหม่" "tyres  เตือนยางอ่อน" "ออก")
     echo "เลือกหมายเลขแล้วกด Enter:"
