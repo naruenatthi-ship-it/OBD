@@ -207,3 +207,13 @@ def test_dashboard_shows_vps_sync_state(tmp_path):
         assert "vps" not in json.loads(urllib.request.urlopen(url).read())
     finally:
         server.shutdown()
+
+
+def test_dashboard_script_keeps_its_helper_names():
+    # a `var hm = ...` inside render() once hid the hm() box helper: every
+    # poll threw and the page said it could not reach the program
+    import re
+    script = dashboard.PAGE.split("<script>", 1)[1]
+    for helper in ("hm", "stat", "f", "esc", "tok", "mix"):
+        assert not re.search(r"\bvar\b[^;]*?[\s,]%s\s*=" % helper, script), \
+            helper

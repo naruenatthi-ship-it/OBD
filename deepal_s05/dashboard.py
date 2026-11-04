@@ -829,13 +829,14 @@ function render(d) {
     st.className = stale && !d.status ? 'err' : '';
     if (!stale) chip('live', 'สด'); else if (d.status) chip('', 'ล่าสุด'); else chip('err', 'ข้อมูลเก่า');
   }
-  var v = d.vps, hm = v ? v.time.slice(11, 16) : '', w = d.wifi;
-  document.getElementById('sync').textContent = (w ? ' · WiFi ' + w.name +
-    (w.signal ? ' ' + w.signal + '%' : '') : '') + (!v ? '' :
-    v.state === 'ok' ? ' · ส่งขึ้นเซิร์ฟเวอร์ครบแล้ว ' + hm :
-    v.state === 'syncing' ? ' · กำลังส่งข้อมูลขึ้นเซิร์ฟเวอร์...' :
-    v.state === 'skip' ? ' · ไม่ส่งขึ้นเซิร์ฟเวอร์ตอนใช้ Hotspot' :
-    ' · ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ ' + hm + ' (จะลองใหม่เอง)');
+  // own names: v and hm are taken further down (values, hero boxes)
+  var sync = d.vps, syncAt = sync ? sync.time.slice(11, 16) : '', net = d.wifi;
+  document.getElementById('sync').textContent = (net ? ' · WiFi ' + net.name +
+    (net.signal ? ' ' + net.signal + '%' : '') : '') + (!sync ? '' :
+    sync.state === 'ok' ? ' · ส่งขึ้นเซิร์ฟเวอร์ครบแล้ว ' + syncAt :
+    sync.state === 'syncing' ? ' · กำลังส่งข้อมูลขึ้นเซิร์ฟเวอร์...' :
+    sync.state === 'skip' ? ' · ไม่ส่งขึ้นเซิร์ฟเวอร์ตอนใช้ Hotspot' :
+    ' · ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ ' + syncAt + ' (จะลองใหม่เอง)');
   document.getElementById('tabbar').hidden = !d.files;
   document.getElementById('alerts').innerHTML = (d.alerts||[]).map(function(a){
     return '<div class="alert'+(a.level>=3?' crit':'')+'">'+esc(a.text)+'</div>';
