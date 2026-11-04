@@ -1,0 +1,10 @@
+#!/bin/sh
+# Installed as /etc/NetworkManager/dispatcher.d/90-deepal-vps-sync.
+# NetworkManager runs it on every network change: when WiFi comes up,
+# copy what was recorded without internet to the VPS right away instead
+# of waiting for the 15-minute timer. Does nothing until `obd vps setup`
+# has installed the sync service.
+[ "$2" = up ] || exit 0
+case "$1" in wlan*) ;; *) exit 0 ;; esac
+[ -f /etc/systemd/system/deepal-vps-sync.service ] || exit 0
+exec systemctl start --no-block deepal-vps-sync.service

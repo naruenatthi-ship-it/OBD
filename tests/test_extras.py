@@ -64,13 +64,67 @@ def test_soh_joins_pieces_of_one_charge(tmp_path):
     write("drive_20261013_0100.csv", b)
     ms = soh.measurements(str(tmp_path))
     assert len(ms) == 1
-    assert ms[0]["soc_start"] == 40 and ms[0]["gain"] == pytest.approx(48)
+    # each piece runs from its first SOC step: 0.1 % less per piece
+    assert ms[0]["soc_start"] == 40 and \
+        ms[0]["gain"] == pytest.approx(48, abs=0.3)
     assert ms[0]["capacity_ah"] == pytest.approx(64 / 0.48, rel=0.02)
     # a recording where the SOC fell in between is not the same charge
     c = charge_rows(120, 16, soc0=20, soc_per_min=0.2,
                     start=T0 + datetime.timedelta(hours=5))
     write("drive_20261013_0100.csv", c)
     assert len(soh.measurements(str(tmp_path))) == 0
+
+
+def drive_csv_rows(start, minutes, soc0, amps=30.0, ah_per_pct=1.46):
+    """A drive every 10 s: `amps` out of the pack, the BMS showing whole
+    percents of a pack that holds 100 x ah_per_pct Ah."""
+    rows = []
+    for k in range(minutes * 6 + 1):
+        used = amps * k * 10 / 3600
+        rows.append({"_t": start + datetime.timedelta(seconds=10 * k),
+                     "soc": str(int(soc0 - used / ah_per_pct + 1e-9)),
+                     "pack_current": str(amps), "pack_voltage": "380",
+                     "motor_rpm": "4000"})
+    return rows
+
+
+def write_drive(path, rows):
+    with open(path, "w") as f:
+        f.write("time,soc,pack_current,pack_voltage,motor_rpm\n")
+        for r in rows:
+            f.write("%s,%s,%s,%s,%s\n" % (
+                r["_t"].isoformat(), r["soc"], r["pack_current"],
+                r["pack_voltage"], r["motor_rpm"]))
+
+
+def test_soh_from_a_week_of_drives(tmp_path):
+    # eight 40-minute drives, parked in between (the car loses 1 % while
+    # asleep, which must not count): 146 Ah pack, whole-percent SOC
+    soc, start = 90.0, T0
+    for day in range(8):
+        rows = drive_csv_rows(start, 40, soc)
+        write_drive(tmp_path / ("drive_%d.csv" % day), rows)
+        soc = float(rows[-1]["soc"]) - 1      # parked drain overnight
+        start += datetime.timedelta(days=1)
+    ms = soh.measurements(str(tmp_path))
+    assert len(ms) == 1 and ms[0]["kind"] == "ขับ"
+    assert ms[0]["blocks"] == 8 and ms[0]["gain"] >= soh.MIN_DROP
+    assert ms[0]["capacity_ah"] == pytest.approx(146, rel=0.03)
+    f = soh.check_soh(str(tmp_path))
+    assert "ขับ" in f.summary
+
+
+def test_soh_drives_split_at_charges(tmp_path):
+    # SOC higher after a gap = charged without the Pi: a new event, and
+    # neither half dropped enough on its own
+    a = drive_csv_rows(T0, 40, 80)
+    b = drive_csv_rows(T0 + datetime.timedelta(days=1), 40, 85)
+    write_drive(tmp_path / "drive_1.csv", a)
+    write_drive(tmp_path / "drive_2.csv", b)
+    assert soh.measurements(str(tmp_path)) == []
+    events = soh.drive_events(predict.sessions(
+        soh.charge_rows(str(tmp_path))))
+    assert len(events) == 2
 
 
 def test_soh_finding_from_files(tmp_path):

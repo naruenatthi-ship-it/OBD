@@ -190,3 +190,20 @@ def test_dashboard_files_routes(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_dashboard_shows_vps_sync_state(tmp_path):
+    state = autopilot.State([], [])
+    server = dashboard.make_server(state, "127.0.0.1", 0, str(tmp_path))
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d/data" % port
+    try:
+        assert "vps" not in json.loads(urllib.request.urlopen(url).read())
+        (tmp_path / ".vps_state").write_text("ok 2026-11-04 21:05:09\n")
+        d = json.loads(urllib.request.urlopen(url).read())
+        assert d["vps"] == {"state": "ok", "time": "2026-11-04 21:05:09"}
+        (tmp_path / ".vps_state").write_text("junk")
+        assert "vps" not in json.loads(urllib.request.urlopen(url).read())
+    finally:
+        server.shutdown()

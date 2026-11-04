@@ -28,6 +28,7 @@ LABELS = {
 
 
 CELL_IR_FILE = "cell_ir.json"  # written by health --cell-ir
+VPS_STATE_FILE = ".vps_state"  # written by pi/obd vps_state
 
 
 class Poller(threading.Thread):
@@ -295,6 +296,22 @@ def view_page(data_dir, entry):
                     sub="ดูตัวอย่างไฟล์", css=FILES_CSS)
 
 
+def vps_state(data_dir):
+    """The Pi's last attempt to copy its data to the VPS, shown in the
+    status line: {"state": "ok"|"fail"|"syncing"|"skip", "time": "date
+    time"}, or None when no VPS is set up (or on the VPS itself, which
+    never receives this file)."""
+    try:
+        with open(os.path.join(data_dir, VPS_STATE_FILE),
+                  encoding="utf-8") as f:
+            parts = f.read().split(None, 1)
+    except OSError:
+        return None
+    if len(parts) != 2 or parts[0] not in ("ok", "fail", "syncing", "skip"):
+        return None
+    return {"state": parts[0], "time": parts[1].strip()}
+
+
 def read_cell_ir(path):
     """The last per-cell IR measurement saved by `health --cell-ir`."""
     if not path:
@@ -444,7 +461,13 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
             if path not in PUBLIC and not self.authorized():
                 return
             if path.startswith("/data"):
-                self.send_body(poller.json().encode("utf-8"),
+                body = poller.json()
+                sync = vps_state(data_dir) if data_dir else None
+                if sync:
+                    d = json.loads(body)
+                    d["vps"] = sync
+                    body = json.dumps(d, ensure_ascii=False)
+                self.send_body(body.encode("utf-8"),
                                "application/json; charset=utf-8")
             elif path == "/ir":
                 self.send_body(json.dumps(read_cell_ir(ir_path),
@@ -736,7 +759,7 @@ HOME_BODY = """<main class="page">
 """
 
 PAGE = ui.document("Deepal S05 · แบตเตอรี่", ui.appbar(
-    "Deepal S05 · แบตเตอรี่", '<span id="status">กำลังเชื่อมต่อ...</span>',
+    "Deepal S05 · แบตเตอรี่", '<span id="status">กำลังเชื่อมต่อ...</span><span id="sync"></span>',
     right='<span class="chip" id="live">รอข้อมูล</span>') + HOME_BODY +
     ui.tabbar("home", hidden=True, ident="tabbar") + r"""<script>
 var css = getComputedStyle(document.documentElement);
@@ -775,6 +798,12 @@ function render(d) {
     st.className = stale && !d.status ? 'err' : '';
     if (!stale) chip('live', 'สด'); else if (d.status) chip('', 'ล่าสุด'); else chip('err', 'ข้อมูลเก่า');
   }
+  var v = d.vps, hm = v ? v.time.slice(11, 16) : '';
+  document.getElementById('sync').textContent = !v ? '' :
+    v.state === 'ok' ? ' · ส่งขึ้นเซิร์ฟเวอร์ครบแล้ว ' + hm :
+    v.state === 'syncing' ? ' · กำลังส่งข้อมูลขึ้นเซิร์ฟเวอร์...' :
+    v.state === 'skip' ? ' · ไม่ส่งขึ้นเซิร์ฟเวอร์ตอนใช้ Hotspot' :
+    ' · ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ ' + hm + ' (จะลองใหม่เอง)';
   document.getElementById('tabbar').hidden = !d.files;
   document.getElementById('alerts').innerHTML = (d.alerts||[]).map(function(a){
     return '<div class="alert'+(a.level>=3?' crit':'')+'">'+esc(a.text)+'</div>';

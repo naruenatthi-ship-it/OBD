@@ -431,7 +431,7 @@ python -m deepal_s05 cancompare canscan_parked.csv canscan_charging.csv
 
 ## ดูรถจากที่ไหนก็ได้ (VPS)
 
-Pi ส่งโฟลเดอร์ข้อมูลขึ้น VPS ทุก 15 นาทีที่มีเน็ต (rsync ผ่าน ssh) และ VPS เปิดหน้าเว็บชุดเดียวกัน (`serve`)
+Pi ส่งโฟลเดอร์ข้อมูลขึ้น VPS ทันทีที่ต่อ WiFi ได้ และทุก 15 นาทีที่มีเน็ต รวมข้อมูลที่บันทึกตอนไม่มีเน็ตด้วย (rsync ผ่าน ssh · ไม่ส่งตอนใช้ Hotspot: `obd vps hotspot off`) และ VPS เปิดหน้าเว็บชุดเดียวกัน (`serve`)
 จากไฟล์ มีรหัสผ่าน VPS ไม่ต่อรถเลย
 
 - ต้องการ: VPS Linux ที่ ssh เข้าได้ มี `python3` (3.8+) และ `rsync` และเปิดพอร์ตเว็บ (ค่าเริ่มต้น 8080) ใน firewall
