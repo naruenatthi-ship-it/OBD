@@ -289,3 +289,14 @@ def test_soh_survives_a_damaged_drive_file(tmp_path):
         b"2026-11-12T07:00:00,80,10,390\n\xe0\xb8\n")
     ms, rated, table = soh.report(str(tmp_path))
     assert ms == []
+
+
+def test_soh_ignores_a_gap_the_clock_missed():
+    # 3 Nov: the Pi lost power while charging and came back with its old
+    # clock: 31 s later the SOC read 100 instead of 7. That is no charge.
+    rows = charge_rows(14, 16, soc0=5, soc_per_min=0.15)
+    t = rows[-1]["_t"]
+    rows += [{"_t": t + datetime.timedelta(seconds=31 + 7 * k), "soc": "100",
+              "pack_current": "9", "pack_voltage": "407"}
+             for k in range(20)]
+    assert soh.measure(rows) is None
