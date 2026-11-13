@@ -322,3 +322,18 @@ def test_soh_cuts_a_fast_charge_out_of_a_drive(tmp_path):
     assert [m["kind"] for m in ms] == ["DC"]
     # 150 A for an hour put in 150 Ah while the SOC rose 48 %
     assert ms[0]["capacity_ah"] == pytest.approx(150 / 0.48, rel=0.05)
+
+
+def test_soh_takes_the_bms_soc_steps_of_a_fast_charge():
+    # 13 Nov 18:36: at ~296 A the BMS moved the SOC 2 % between two
+    # readings 8 s apart; that is its update step, not a missed gap
+    rows = []
+    t = T0
+    soc = 43
+    for k in range(60):
+        t += datetime.timedelta(seconds=8 if k % 3 == 0 else 22)
+        soc += 2 if k % 3 == 0 else 0
+        rows.append({"_t": t, "soc": str(min(soc, 80)),
+                     "pack_current": "-296", "pack_voltage": "400"})
+    m = soh.measure(rows)
+    assert m is not None and m["gain"] >= 30

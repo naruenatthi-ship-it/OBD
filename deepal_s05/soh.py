@@ -22,6 +22,7 @@ MAX_STEP_S = 60.0        # longer gaps are not integrated over
 MAX_JOIN_S = 12 * 3600   # pieces of one charge may be this far apart
 MIN_CHARGE_ROWS = 10     # rows in a row taking charge, motor still
 MAX_SOC_PER_MIN = 3.0    # faster SOC changes are gaps the clock missed
+MAX_SOC_STEP = 3.0       # the BMS updates the SOC in steps of up to 2 %
 NOMINAL_CELL_V = 3.2     # LFP
 
 
@@ -62,7 +63,8 @@ def measure(rows, discharge=False):
         # The Pi has no clock battery: booted with no network it carries on
         # from the time it last saved, so hours off can look like seconds.
         # A SOC step faster than any charger is such a hidden gap.
-        jump = abs(p[1] - prev[1]) > 1 + MAX_SOC_PER_MIN * max(dt, 0) / 60
+        jump = abs(p[1] - prev[1]) > MAX_SOC_STEP + \
+            MAX_SOC_PER_MIN * max(dt, 0) / 60
         if dt > MAX_STEP_S or dt < 0 or jump:
             stretches.append(cur)
             cur = []
