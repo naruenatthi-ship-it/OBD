@@ -41,6 +41,7 @@ usage() {
   rec [ชื่อ] [นาที] [watch]  บันทึกค่าจากไฟล์ scan ล่าสุดทุก 2 วินาที แบบเบื้องหลัง
                    ใส่ watch = ค่าที่น่าจับตาจากการสำรวจ (700, ความเร็วล้อ 780)
                    ใส่ all = ทุกค่าที่ obd survey เคยเจอ (ใช้หาอุณหภูมิ/ค่าใหม่ตอนขับไกล)
+                   ใส่ moving = รายการจาก obd watch (เช่น obd watch moving 700) อ่านครบทุกค่าทุกรอบ ใช้ทดสอบเปิด/ปิดอุปกรณ์
                    เช่น obd rec drive 20 (ปิด Termius/ล็อกจอขับได้เลย)
   stop             หยุดงานเบื้องหลัง (obd rec / obd bg)
   bg <คำสั่ง>       สั่งคำสั่งไหนก็ได้ให้ทำงานเบื้องหลัง เช่น obd bg scan 7A4,742 0100-EFFF
@@ -365,6 +366,7 @@ do_command() {
             case "${3:-}" in
                 watch) scan="$APP/examples/watch_live.csv" ;;
                 all)   scan="$DATA/survey_results.csv" ;;
+                moving) scan="$DATA/watch_live.csv" ;;
                 "")    scan=$(ls -t "$DATA"/scan_*.csv 2>/dev/null | head -1) ;;
                 *)     scan=$3 ;;
             esac
