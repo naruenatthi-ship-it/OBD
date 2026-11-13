@@ -192,10 +192,21 @@ INSULATION_CANDIDATES = [
            "ตัวเต็งค่าฉนวนไฟแรงสูง ยังไม่ยืนยัน ไม่ใช้แจ้งเตือน"),
 ]
 
+# Four more BMS temperatures, found on the 13 Nov drive to Chiang Mai:
+# F1B0-F1BF are 16 one-byte slots (A-40); F1B4-F1BF read 0x28 = 0 C (unused)
+# while F1B0-F1B3 read 35-40 C and moved with the pack temperature
+# (F1B3 vs F252 r = 0.93, 26 readings). Perhaps one per BMS slave board.
+BMS_TEMP_CANDIDATES = [
+    Signal("bms_temp_%d" % (n + 1), "อุณหภูมิ BMS จุด %d" % (n + 1),
+           0xF1B0 + n, "C", 1, CANDIDATE, lambda d, c: d[0] - 40,
+           "เจอ 13 พ.ย. ขยับตามอุณหภูมิแบต ยังไม่รู้ว่าวัดที่ไหน")
+    for n in range(4)]
+
 LIVE_KEYS = ["soc", "pack_voltage", "pack_current", "cell_v_max",
              "cell_v_min", "batt_temp_max", "batt_temp_min", "soh",
              "charge_temp", "motor_temp", "inverter_temp", "motor_rpm",
-             "motor_torque", "odometer_km", "iso_candidate_kohm", "dc_accept_kw"]
+             "motor_torque", "odometer_km", "iso_candidate_kohm", "dc_accept_kw",
+             "bms_temp_1", "bms_temp_2", "bms_temp_3", "bms_temp_4"]
 
 
 # Above this charging current (A into the pack) it is a DC fast charge:
