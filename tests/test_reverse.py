@@ -107,3 +107,14 @@ def test_watch_all_takes_survey_finds_minus_known(tmp_path):
     assert autopilot.load_watch(str(tmp_path)) == []
     assert main(["watch", "reset", "--dir", str(tmp_path)]) == 0
     assert len(autopilot.load_watch(str(tmp_path))) > 1   # default list
+
+
+def test_watch_moving_keeps_only_values_that_changed(tmp_path):
+    from deepal_s05 import autopilot
+    from deepal_s05.cli import main
+    (tmp_path / "drive_20261113.csv").write_text(
+        "time,soc,did_700_F2F3,did_700_F1A8,did_7A1_F1B0\n"
+        "2026-11-13T10:00:00,80,51,AB,4B\n"
+        "2026-11-13T10:00:05,80,52,AB,4C\n")   # F1B0 is known now
+    assert main(["watch", "moving", "--dir", str(tmp_path)]) == 0
+    assert autopilot.load_watch(str(tmp_path)) == [("700", "F2F3")]

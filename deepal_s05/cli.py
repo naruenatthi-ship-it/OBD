@@ -1789,9 +1789,37 @@ def cmd_soh(args):
     return 0
 
 
+def moving_dids(folder):
+    """(header, did) of the did_ columns in the drive files that held more
+    than one value: live data worth working out, not part numbers."""
+    import csv
+    import glob
+    seen = {}
+    for path in sorted(glob.glob(os.path.join(folder, "drive_*.csv"))):
+        try:
+            with open(path, newline="", encoding="utf-8",
+                      errors="replace") as f:
+                for row in csv.DictReader(snapshot.no_nul(f)):
+                    for k, v in row.items():
+                        if k and k.startswith("did_") and v:
+                            vals = seen.setdefault(k, set())
+                            if len(vals) < 2:
+                                vals.add(v)
+        except (OSError, csv.Error):
+            continue
+    keys = []
+    for k, vals in seen.items():
+        parts = k.split("_")
+        if len(vals) > 1 and len(parts) == 3 and \
+                int(parts[2], 16) not in PRIVATE_DIDS:
+            keys.append((parts[1].upper(), parts[2].upper()))
+    return sorted(keys)
+
+
 def cmd_watch(args):
     """The DIDs autopilot logs raw in the drive files: `all` = every DID the
-    survey found, minus the ones the profile already decodes."""
+    survey found, minus the ones the profile already decodes; `moving` =
+    those of them whose value changed in the drive files so far."""
     import csv
     from . import autopilot, reverse
     path = os.path.join(args.dir, autopilot.WATCH_FILE)
@@ -1813,6 +1841,17 @@ def cmd_watch(args):
         if args.headers:
             wanted = {h.strip().upper() for h in args.headers.split(",")}
             keys = [k for k in keys if k[0] in wanted]
+    if args.action == "moving":
+        known = {(s.header.upper(), "%04X" % s.did)
+                 for s in args.vehicle.signals}
+        keys = [k for k in moving_dids(args.dir) if k not in known]
+        if args.headers:
+            wanted = {h.strip().upper() for h in args.headers.split(",")}
+            keys = [k for k in keys if k[0] in wanted]
+        if not keys:
+            print("ยังไม่เจอค่าที่ขยับในไฟล์ขับ: ใช้ obd watch all ขับสักพักก่อน")
+            return 1
+    if args.action in ("all", "moving"):
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["header", "did"])
@@ -1820,7 +1859,7 @@ def cmd_watch(args):
     keys = autopilot.load_watch(args.dir, PRIVATE_DIDS)
     rounds = -(-len(keys) // autopilot.WATCH_PER_ROUND)
     print("เฝ้าดู %d ค่า (%s) · อ่านครบทุกค่าทุก ~%d รอบ (~%d วินาที)" % (
-        len(keys), "จาก survey" if os.path.exists(path) else "รายการเริ่มต้น",
+        len(keys), "เลือกเอง" if os.path.exists(path) else "รายการเริ่มต้น",
         rounds, rounds * 6))
     return 0
 
@@ -2413,8 +2452,9 @@ def build_parser():
 
     wa = sub.add_parser("watch", help="ค่าดิบที่โหมดอัตโนมัติเก็บไว้แกะสูตร")
     wa.add_argument("action", nargs="?", default="status",
-                    choices=["status", "all", "reset"],
-                    help="all = ทุกค่าที่ survey เจอ · reset = รายการเริ่มต้น")
+                    choices=["status", "all", "moving", "reset"],
+                    help="all = ทุกค่าที่ survey เจอ · moving = เฉพาะค่าที่เคยขยับ"
+                         "ในไฟล์ขับ · reset = รายการเริ่มต้น")
     wa.add_argument("headers", nargs="?",
                     help="เฉพาะกล่องเหล่านี้ เช่น 7A1,7A7,7A4 (ใช้กับ all)")
     wa.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
