@@ -300,3 +300,25 @@ def test_soh_ignores_a_gap_the_clock_missed():
               "pack_current": "9", "pack_voltage": "407"}
              for k in range(20)]
     assert soh.measure(rows) is None
+
+
+def test_soh_cuts_a_fast_charge_out_of_a_drive(tmp_path):
+    # 13 Nov: drove into a DC charger and plugged in within minutes, so the
+    # drive and the charge were one recording with no gap
+    t0 = T0
+    rows = []
+    for k in range(40):        # 20 min of driving, 60 -> 50 %
+        rows.append((t0 + datetime.timedelta(seconds=30 * k),
+                     60 - k * 0.25, 60, 6000))
+    t1 = rows[-1][0] + datetime.timedelta(seconds=30)
+    for k in range(121):       # 60 min at 150 A, 50 -> 98 %
+        rows.append((t1 + datetime.timedelta(seconds=30 * k),
+                     50 + k * 0.4, -150, 0))
+    with open(tmp_path / "drive_20261012.csv", "w") as f:
+        f.write("time,soc,pack_current,pack_voltage,motor_rpm\n")
+        for t, soc, i, rpm in rows:
+            f.write("%s,%d,%s,400,%s\n" % (t.isoformat(), soc, i, rpm))
+    ms = soh.measurements(str(tmp_path))
+    assert [m["kind"] for m in ms] == ["DC"]
+    # 150 A for an hour put in 150 Ah while the SOC rose 48 %
+    assert ms[0]["capacity_ah"] == pytest.approx(150 / 0.48, rel=0.05)

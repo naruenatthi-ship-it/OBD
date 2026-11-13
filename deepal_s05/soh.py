@@ -20,6 +20,7 @@ MIN_DROP = 20.0          # % SOC drives must use (counted only while
 MAX_DRIVE_JOIN_S = 14 * 86400  # drives between two charges are joined
 MAX_STEP_S = 60.0        # longer gaps are not integrated over
 MAX_JOIN_S = 12 * 3600   # pieces of one charge may be this far apart
+MIN_CHARGE_ROWS = 10     # rows in a row taking charge, motor still
 MAX_SOC_PER_MIN = 3.0    # faster SOC changes are gaps the clock missed
 NOMINAL_CELL_V = 3.2     # LFP
 
@@ -151,9 +152,43 @@ def charge_rows(folder):
                               days=3650, cell_every=10 ** 9)
 
 
+def split_charges(sessions):
+    """Cut charging out of drive sessions: driving into a fast charger and
+    plugging in within a few minutes leaves no gap in the recording, so
+    the drive and the charge arrive as one session. A run of at least
+    MIN_CHARGE_ROWS rows taking charge with the motor still is a charge."""
+    def charging(r):
+        i = predict.num(r.get("pack_current"))
+        rpm = abs(predict.num(r.get("motor_rpm")) or 0)
+        return i is not None and i < -2 and rpm < 50
+    out = []
+    for kind, rows in sessions:
+        if kind == "charge":
+            out.append((kind, rows))
+            continue
+        flags = [charging(r) for r in rows]
+        start, k = 0, 0
+        while k < len(rows):
+            if not flags[k]:
+                k += 1
+                continue
+            end = k
+            while end < len(rows) and flags[end]:
+                end += 1
+            if end - k >= MIN_CHARGE_ROWS:
+                if k > start:
+                    out.append((kind, rows[start:k]))
+                out.append(("charge", rows[k:end]))
+                start = end
+            k = end
+        if start < len(rows):
+            out.append((kind, rows[start:]))
+    return out
+
+
 def measurements(folder):
     """Charges and drives that could be measured, oldest first."""
-    sessions = predict.sessions(charge_rows(folder))
+    sessions = split_charges(predict.sessions(charge_rows(folder)))
     out = [m for m in (measure(s) for s in charge_events(sessions)) if m]
     out += [m for m in (measure(s, discharge=True)
                         for s in drive_events(sessions)) if m]
