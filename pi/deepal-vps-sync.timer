@@ -1,5 +1,5 @@
 [Unit]
-Description=Copy Deepal OBD data to the VPS every 15 minutes
+Description=Copy Deepal OBD data to the VPS every 15 minutes (also on WiFi up)
 
 [Timer]
 OnBootSec=5min

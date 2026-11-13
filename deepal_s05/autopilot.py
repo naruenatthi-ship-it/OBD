@@ -16,7 +16,68 @@ import traceback
 
 from . import (alerts, analysis, cost, dashboard, identity, pids, snapshot,
                survey, tyres)
-from .elm327 import ElmError
+from .elm327 import ElmError, NegativeResponse, NoData
+
+WATCH_FILE = "watch_live.csv"  # DIDs still being worked out (header,did)
+WATCH_PER_ROUND = 8            # 32 DIDs: each one about every 4 rounds
+
+
+def load_watch(data_dir, private=()):
+    """(header, did) pairs to log raw in every drive file: a
+    watch_live.csv in the data folder, else the one in examples/."""
+    import csv
+    path = os.path.join(data_dir, WATCH_FILE)
+    if not os.path.exists(path):
+        path = os.path.join(os.path.dirname(__file__), "..", "examples",
+                            WATCH_FILE)
+    keys = []
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(snapshot.no_nul(f)):
+                header = (row.get("header") or "").strip().upper()
+                did = (row.get("did") or "").strip().upper()
+                try:
+                    num = int(did, 16)
+                except ValueError:
+                    continue
+                if header and num not in private and \
+                        (header, did) not in keys:
+                    keys.append((header, did))
+    except OSError:
+        return []
+    return keys
+
+
+class WatchReader:
+    """Reads a few of the watch DIDs each round, in turn, so the BMS values
+    keep their pace and every watch DID still comes round every ~30 s.
+    Raw hex goes into columns did_<header>_<did> (the `obd rec` names);
+    a DID the ECU refuses is skipped until the car wakes up again."""
+
+    def __init__(self, keys, per_round=WATCH_PER_ROUND):
+        self.keys, self.per_round = list(keys), per_round
+        self.pos = 0
+        self.refused = set()
+
+    def wake(self):
+        self.refused.clear()
+
+    def round(self, elm):
+        live = [k for k in self.keys if k not in self.refused]
+        # every column from the first row: the day's file is rewritten
+        # once for new columns, not once per DID
+        out = {"did_%s_%s" % k: "" for k in live}
+        for _ in range(min(self.per_round, len(live))):
+            key = live[self.pos % len(live)]
+            self.pos += 1
+            try:
+                out["did_%s_%s" % key] = elm.read_did(
+                    key[0], int(key[1], 16)).hex().upper()
+            except NegativeResponse:
+                self.refused.add(key)
+            except NoData:
+                pass
+        return out
 
 
 class State:
@@ -78,7 +139,8 @@ class Autopilot:
                  asleep_poll=60.0, rest_log_every=300.0, retry=30.0,
                  checkup_days=7.0, run_checkup=None, shutdown_below=None,
                  shutdown_after=600.0, shutdown=None, clock=time.time,
-                 info=None, vehicle=None, baselines=None, private=()):
+                 info=None, vehicle=None, baselines=None, private=(),
+                 watch=None):
         self.open_elm = open_elm
         self.signals, self.arrays = signals, arrays
         self.data_dir = data_dir
@@ -98,6 +160,9 @@ class Autopilot:
         self.dc = analysis.DcSession(
             capacity, cost.load_tariff(data_dir)["dc_price"])
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
+        # watch=None: the default list; [] turns it off
+        keys = load_watch(data_dir, private) if watch is None else watch
+        self.watch = WatchReader(keys) if keys else None
         self.tyres = tyres.Monitor(data_dir, clock) if any(
             s.key == "motor_rpm" for s in signals) else None
         self.baselines = baselines or {}  # usual values, from checkups
@@ -184,6 +249,8 @@ class Autopilot:
                 self.survey.state["pause_until_wake"]
             if paused and boot_time() > paused:
                 self.survey.set(pause_until_wake=False)
+            if self.watch is not None:
+                self.watch.wake()
         try:
             snap = snapshot.take(self.elm, self.signals, self.arrays,
                                  self.capacity, slow=self.slow)
@@ -202,7 +269,18 @@ class Autopilot:
                 tyre = self.tyres.round(self.elm, values)
             except (ElmError, OSError):
                 pass  # the next round reads the wheels again
-        self.log_drive(snap)
+        logged = snap
+        if self.watch is not None:
+            try:
+                extra = self.watch.round(self.elm)
+            except (ElmError, OSError):
+                extra = {}  # the next round reconnects if it is gone
+            if extra:
+                # raw hex is for the file only, not the dashboard
+                logged = snapshot.Snapshot(snap.time,
+                                           dict(snap.values, **extra),
+                                           snap.arrays, snap.errors)
+        self.log_drive(logged)
         if not self.bms_read:
             self.bms_read = True
             try:

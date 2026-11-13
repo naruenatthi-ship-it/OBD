@@ -1159,7 +1159,7 @@ def cmd_autopilot(args):
         private=PRIVATE_DIDS)
     server = dashboard.make_server(pilot.state, args.host, args.http_port,
                                    data_dir, car_name=args.vehicle.name,
-                                   car_key=args.car)
+                                   car_key=args.car, local=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("autopilot: เก็บข้อมูลที่ %s  หน้าจอ http://<IP>:%d" % (
         data_dir, args.http_port))
@@ -1769,16 +1769,18 @@ def survey_digest(args):
 def cmd_soh(args):
     from . import soh
     ms, rated, table = soh.report(args.dir, args.capacity)
-    print("ความจุแบตวัดจากการชาร์จ (เทียบกับ %.0f Ah = %.1f kWh)\n" % (
+    print("ความจุแบตวัดจากการชาร์จและการขับ (เทียบกับ %.0f Ah = %.1f kWh)\n" % (
         rated, args.capacity))
     if not ms:
-        print("ยังไม่มีการชาร์จที่วัดได้: ต้องชาร์จเพิ่มอย่างน้อย %d%% ในครั้งเดียว"
-              " ขณะที่ Pi บันทึกอยู่ (โหมดอัตโนมัติ หรือ obd charge)"
-              % soh.MIN_GAIN)
+        print("ยังวัดไม่ได้: ขับให้ SOC ลดรวมกันอย่างน้อย %d%% ก่อนชาร์จครั้งถัดไป"
+              " (Pi บันทึกเองตอนขับ ไม่ต้องสั่งอะไร) หรือชาร์จเพิ่ม %d%%"
+              " ในครั้งเดียวขณะที่ Pi บันทึกอยู่" % (soh.MIN_DROP, soh.MIN_GAIN))
         return 1
     print(table)
-    print("\n* kWh ที่เข้าแบต (ฝั่ง DC) คิดเป็นแบตเต็ม 100%"
-          "\n'วัดได้' = SOC ที่เพิ่มในช่วงที่ Pi มีข้อมูลต่อเนื่อง (ช่วงที่ข้อมูลขาดไม่นับ)"
+    print("\n* kWh ที่เข้า/ออกแบต (ฝั่ง DC) คิดเป็นแบตเต็ม 100%"
+          "\n'วัดได้' = SOC ที่เปลี่ยนในช่วงที่ Pi มีข้อมูลต่อเนื่อง (ช่วงที่ข้อมูลขาดไม่นับ)"
+          "\n'ขับ' = รวมทุกทริประหว่างการชาร์จสองครั้ง (EXPERIMENTAL: SOC ช่วงกลางของ LFP"
+          " ประมาณยาก ผลอาจคลาดไม่กี่ %)"
           "\nSOC เป็นค่าที่ BMS ประมาณเอง ค่าจากการชาร์จจนเต็ม (✓เต็ม) แม่นที่สุด"
           " ดูแนวโน้มหลายเดือน อย่าตัดสินจากครั้งเดียว")
     return 0

@@ -59,6 +59,9 @@ printf '[Journal]\nStorage=volatile\nRuntimeMaxUse=20M\n' | \
 echo "==> อนุญาตให้โปรแกรมสั่งปิดเครื่องเมื่อแบต 12V ต่ำ และหยุด/เปิดบริการโดยไม่ถามรหัส"
 {
     echo "$USER_NAME ALL=(root) NOPASSWD: /sbin/shutdown"
+    # the dashboard's WiFi page (only on the phone hotspot) saves,
+    # ranks and switches networks
+    echo "$USER_NAME ALL=(root) NOPASSWD: $(command -v nmcli || echo /usr/bin/nmcli)"
     for action in start stop restart; do
         echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl $action deepal-obd"
     done
@@ -73,6 +76,17 @@ sed "s/@USER@/$USER_NAME/" "$APP/pi/deepal-obd.service" | \
 sudo cp "$APP/pi/deepal-hotspot.service" "$APP/pi/deepal-hotspot.timer" \
     /etc/systemd/system/
 sudo chmod +x "$APP/pi/hotspot-first.sh"
+if [ -d /etc/NetworkManager/dispatcher.d ]; then
+    # copies the data to the VPS as soon as WiFi connects (once set up)
+    sudo install -m 755 "$APP/pi/deepal-vps-dispatch" \
+        /etc/NetworkManager/dispatcher.d/90-deepal-vps-sync
+fi
+if [ -f /etc/systemd/system/deepal-vps-sync.service ]; then
+    # `obd vps setup` was done: bring its units up to date too
+    sed "s/@USER@/$USER_NAME/" "$APP/pi/deepal-vps-sync.service" | \
+        sudo tee /etc/systemd/system/deepal-vps-sync.service >/dev/null
+    sudo cp "$APP/pi/deepal-vps-sync.timer" /etc/systemd/system/
+fi
 sudo systemctl daemon-reload
 sudo systemctl enable deepal-obd
 sudo systemctl enable --now deepal-hotspot.timer
