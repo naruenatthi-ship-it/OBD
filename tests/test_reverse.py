@@ -91,3 +91,17 @@ def test_read_scan_takes_survey_results_with_hidden_values(tmp_path):
                  "2026-10-16T23:00:00,700,F2F0,1,8F\n"
                  "2026-10-16T23:00:01,706,F18C,4,(ซ่อน)\n")
     assert reverse.read_scan(str(p)) == {("700", "F2F0"): b"\x8f"}
+
+
+def test_watch_all_takes_survey_finds_minus_known(tmp_path):
+    from deepal_s05 import autopilot
+    from deepal_s05.cli import main
+    (tmp_path / "survey_results.csv").write_text(
+        "time,header,did,length,raw\n"
+        "2026-10-16T23:00:00,700,F2F3,1,51\n"
+        "2026-10-16T23:00:01,7A1,F252,1,45\n"      # batt_temp_max: known
+        "2026-10-16T23:00:02,706,F18C,4,(ซ่อน)\n")
+    assert main(["watch", "all", "--dir", str(tmp_path)]) == 0
+    assert autopilot.load_watch(str(tmp_path)) == [("700", "F2F3")]
+    assert main(["watch", "reset", "--dir", str(tmp_path)]) == 0
+    assert len(autopilot.load_watch(str(tmp_path))) > 1   # default list

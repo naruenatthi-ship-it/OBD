@@ -1786,6 +1786,39 @@ def cmd_soh(args):
     return 0
 
 
+def cmd_watch(args):
+    """The DIDs autopilot logs raw in the drive files: `all` = every DID the
+    survey found, minus the ones the profile already decodes."""
+    import csv
+    from . import autopilot, reverse
+    path = os.path.join(args.dir, autopilot.WATCH_FILE)
+    if args.action == "reset":
+        if os.path.exists(path):
+            os.remove(path)
+        print("กลับไปใช้รายการเฝ้าดูเริ่มต้น (%d ค่า)"
+              % len(autopilot.load_watch(args.dir, PRIVATE_DIDS)))
+        return 0
+    if args.action == "all":
+        source = os.path.join(args.dir, "survey_results.csv")
+        if not os.path.exists(source):
+            print("ยังไม่มีผล survey (survey_results.csv) ในโฟลเดอร์ข้อมูล")
+            return 1
+        known = {(s.header.upper(), "%04X" % s.did)
+                 for s in args.vehicle.signals}
+        keys = [k for k in sorted(reverse.read_scan(source))
+                if k not in known and int(k[1], 16) not in PRIVATE_DIDS]
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["header", "did"])
+            w.writerows(keys)
+    keys = autopilot.load_watch(args.dir, PRIVATE_DIDS)
+    rounds = -(-len(keys) // autopilot.WATCH_PER_ROUND)
+    print("เฝ้าดู %d ค่า (%s) · อ่านครบทุกค่าทุก ~%d รอบ (~%d วินาที)" % (
+        len(keys), "จาก survey" if os.path.exists(path) else "รายการเริ่มต้น",
+        rounds, rounds * 6))
+    return 0
+
+
 def cmd_tyres(args):
     from . import tyres
     if args.action == "reset":
@@ -2372,6 +2405,13 @@ def build_parser():
     so.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
     so.set_defaults(func=cmd_soh)
 
+    wa = sub.add_parser("watch", help="ค่าดิบที่โหมดอัตโนมัติเก็บไว้แกะสูตร")
+    wa.add_argument("action", nargs="?", default="status",
+                    choices=["status", "all", "reset"],
+                    help="all = ทุกค่าที่ survey เจอ · reset = รายการเริ่มต้น")
+    wa.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    wa.set_defaults(func=cmd_watch)
+
     ty = sub.add_parser("tyres", help="เตือนยางอ่อนจากความเร็ว 4 ล้อ (ทดลอง)")
     ty.add_argument("action", nargs="?", default="status",
                     choices=["status", "reset"],
@@ -2420,7 +2460,7 @@ def main(argv=None):
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
                cmd_visual, cmd_predict, cmd_clean, cmd_soh,
                cmd_cancompare, cmd_cost, cmd_serve, cmd_canfind,
-               cmd_survey, cmd_eco)
+               cmd_survey, cmd_eco, cmd_watch)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

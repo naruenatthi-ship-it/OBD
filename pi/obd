@@ -62,6 +62,8 @@ usage() {
   survey digest    สรุปผลใหม่เป็นข้อความสั้น (หรือเปิดหน้า /digest ไม่ต้องพิมพ์)
   soh              วัดความจุแบตจริงจากการชาร์จ (SOH วัดเอง)
   cost             ค่าไฟการชาร์จรายเดือน
+  watch all        ให้โหมดอัตโนมัติเก็บทุกค่าที่ survey เจอ ระหว่างขับ (หาอุณหภูมิ/ค่าใหม่, dashboard ยังใช้ได้)
+  watch reset      กลับไปเก็บแค่รายการเริ่มต้น · obd watch = ดูว่าเก็บอยู่กี่ค่า
   tyres            เตือนยางอ่อน (เทียบความเร็ว 4 ล้อตอนขับทางตรง, ทดลอง)
   tyres reset      เรียนรู้ยางใหม่ หลังเติมลมให้ถูกต้อง/เปลี่ยนยาง
   canscan [ชื่อ]    ดักฟัง CAN ที่รถกระจายเอง (ฟังอย่างเดียว ~3 นาที) เช่น obd canscan charging
@@ -456,6 +458,14 @@ do_command() {
         soh|cost)
             cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 "$cmd" \
                 --dir "$DATA" "$@" ;;
+        watch)
+            local action=${1:-status}
+            (cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 watch \
+                "$action" --dir "$DATA") || return 1
+            if [ "$action" != status ]; then
+                as_root "$SYSTEMCTL" restart deepal-obd &&
+                    echo "เริ่มโหมดอัตโนมัติใหม่แล้ว ดู dashboard ได้ตามปกติ"
+            fi ;;
         tyres)
             cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 tyres \
                 "${1:-status}" --dir "$DATA" ;;
