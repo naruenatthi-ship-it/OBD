@@ -92,7 +92,7 @@ def load_baselines(path, min_rows=3):
     """The car's usual values: medians over earlier checkups in
     checkup_history.csv, for keys with at least `min_rows` readings."""
     try:
-        with open(path, newline="", encoding="utf-8") as f:
+        with open(path, newline="", encoding="utf-8", errors="replace") as f:
             rows = list(csv.DictReader(snapshot.no_nul(f)))
     except OSError:
         return {}

@@ -280,3 +280,12 @@ def test_canfind_searches_every_multiplexed_payload():
     assert row["samples"].count("|") == 1
     assert ("5A0", 1, 3, "big", 10, 42795.3) in canscan.find_value(
         [row], 42795, 1)
+
+
+def test_soh_survives_a_damaged_drive_file(tmp_path):
+    # a power cut can leave half a UTF-8 character in a drive file
+    (tmp_path / "drive_20261112.csv").write_bytes(
+        b"time,soc,pack_current,pack_voltage\n"
+        b"2026-11-12T07:00:00,80,10,390\n\xe0\xb8\n")
+    ms, rated, table = soh.report(str(tmp_path))
+    assert ms == []

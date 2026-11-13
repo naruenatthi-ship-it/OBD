@@ -190,7 +190,8 @@ class CsvLog:
 
     def _add_columns(self, missing):
         self.file.close()
-        with open(self.path, newline="", encoding="utf-8") as f:
+        with open(self.path, newline="", encoding="utf-8",
+                  errors="replace") as f:
             rows = list(csv.DictReader(no_nul(f)))
         fields = list(self.writer.fieldnames) + missing
         with open(self.path, "w", newline="", encoding="utf-8") as f:
@@ -204,7 +205,8 @@ class CsvLog:
     def _open(self, fields):
         header = None
         try:
-            with open(self.path, newline="", encoding="utf-8") as f:
+            with open(self.path, newline="", encoding="utf-8",
+                      errors="replace") as f:
                 header = next(csv.reader(no_nul(f)), None)
         except OSError:
             pass

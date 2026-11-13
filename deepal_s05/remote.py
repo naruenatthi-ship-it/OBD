@@ -28,7 +28,7 @@ class LatestFile:
             return None
         path = max(paths, key=os.path.getmtime)
         last = None
-        with open(path, newline="", encoding="utf-8") as f:
+        with open(path, newline="", encoding="utf-8", errors="replace") as f:
             for last in csv.DictReader(snapshot.no_nul(f)):
                 pass
         return last

@@ -73,7 +73,7 @@ def read_rows(paths):
     rows = []
     for p in paths:
         try:
-            with open(p, newline="", encoding="utf-8") as f:
+            with open(p, newline="", encoding="utf-8", errors="replace") as f:
                 rows.extend(csv.DictReader(snapshot.no_nul(f)))
         except (OSError, csv.Error):
             continue
@@ -100,7 +100,7 @@ def read_drive(folder, patterns=("drive_*.csv",), days=90, cell_every=10):
     rows = []
     for p in sorted(paths):
         try:
-            with open(p, newline="", encoding="utf-8") as f:
+            with open(p, newline="", encoding="utf-8", errors="replace") as f:
                 for n, r in enumerate(csv.DictReader(snapshot.no_nul(f))):
                     slim = {k: r.get(k) for k in SLIM_KEYS if r.get(k)}
                     soc = num(r.get("soc"))

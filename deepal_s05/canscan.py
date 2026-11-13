@@ -121,7 +121,7 @@ def save(path, rows):
 
 
 def load(path):
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
         return {r["id"]: r for r in csv.DictReader(snapshot.no_nul(f))}
 
 

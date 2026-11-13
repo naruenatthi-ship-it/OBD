@@ -76,7 +76,7 @@ def latest(folder, pattern):
 
 
 def read_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
         return list(csv.DictReader(snapshot.no_nul(f)))
 
 

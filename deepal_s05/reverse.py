@@ -19,7 +19,7 @@ INTERPRETATIONS = [
 def read_scan(path):
     """discover CSV -> {(header, did): bytes}."""
     out = {}
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
         for row in csv.DictReader(snapshot.no_nul(f)):
             try:
                 raw = bytes.fromhex(row["raw"])
@@ -170,7 +170,7 @@ def moving_bytes(rows, did_keys):
 
 def read_record(path):
     """record CSV -> (rows, did_keys); DID columns hold hex strings."""
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(snapshot.no_nul(f))
         fields = reader.fieldnames or []
         did_keys = [c for c in fields if c.startswith("did_")]

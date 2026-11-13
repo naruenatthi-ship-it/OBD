@@ -42,7 +42,7 @@ def num(text):
 
 
 def load_run(path):
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(snapshot.no_nul(f))
         columns = list(reader.fieldnames or [])
         rows = list(reader)
@@ -253,7 +253,7 @@ ZONE_LABEL = {"top": "SOC ≥ 95%", "low": "SOC ≤ 25%", "mid": "SOC กลา�
 
 def _read_rows(path):
     try:
-        with open(path, newline="", encoding="utf-8") as f:
+        with open(path, newline="", encoding="utf-8", errors="replace") as f:
             rows = list(csv.DictReader(snapshot.no_nul(f)))
     except OSError:
         return []

@@ -32,7 +32,7 @@ def load_watch(data_dir, private=()):
                             WATCH_FILE)
     keys = []
     try:
-        with open(path, newline="", encoding="utf-8") as f:
+        with open(path, newline="", encoding="utf-8", errors="replace") as f:
             for row in csv.DictReader(snapshot.no_nul(f)):
                 header = (row.get("header") or "").strip().upper()
                 did = (row.get("did") or "").strip().upper()
