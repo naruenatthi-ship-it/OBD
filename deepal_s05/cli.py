@@ -1864,6 +1864,12 @@ def cmd_watch(args):
     return 0
 
 
+def cmd_marks(args):
+    from . import marks
+    print(marks.report(args.dir))
+    return 0
+
+
 def cmd_tyres(args):
     from . import tyres
     if args.action == "reset":
@@ -2460,6 +2466,10 @@ def build_parser():
     wa.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
     wa.set_defaults(func=cmd_watch)
 
+    mk = sub.add_parser("marks", help="ค่าไหนเปลี่ยนตอนกดปุ่มในหน้า /mark")
+    mk.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
+    mk.set_defaults(func=cmd_marks)
+
     ty = sub.add_parser("tyres", help="เตือนยางอ่อนจากความเร็ว 4 ล้อ (ทดลอง)")
     ty.add_argument("action", nargs="?", default="status",
                     choices=["status", "reset"],
@@ -2508,7 +2518,7 @@ def main(argv=None):
                cmd_correlate, cmd_fetch_obdb, cmd_trip, cmd_notify_test,
                cmd_visual, cmd_predict, cmd_clean, cmd_soh,
                cmd_cancompare, cmd_cost, cmd_serve, cmd_canfind,
-               cmd_survey, cmd_eco, cmd_watch)
+               cmd_survey, cmd_eco, cmd_watch, cmd_marks)
     if args.func not in offline and not args.port:
         parser.error("ต้องใส่ --port")
     try:

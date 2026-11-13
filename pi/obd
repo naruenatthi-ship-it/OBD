@@ -66,6 +66,7 @@ usage() {
   watch all        ให้โหมดอัตโนมัติเก็บทุกค่าที่ survey เจอ ระหว่างขับ (หาอุณหภูมิ/ค่าใหม่, dashboard ยังใช้ได้)
   watch all 7A1,7A7  เฉพาะบางกล่อง (รอบเร็วขึ้น)
   watch moving     เฉพาะค่าที่เคยขยับในไฟล์ขับ (ค่าสดที่ยังไม่รู้ความหมาย ไม่เอารหัส/ค่าคงที่)
+  marks            ค่าไหนเปลี่ยนตอนกดปุ่มในหน้า "ทดสอบสวิตช์" (/mark) บน dashboard
   watch reset      กลับไปเก็บแค่รายการเริ่มต้น · obd watch = ดูว่าเก็บอยู่กี่ค่า
   tyres            เตือนยางอ่อน (เทียบความเร็ว 4 ล้อตอนขับทางตรง, ทดลอง)
   tyres reset      เรียนรู้ยางใหม่ หลังเติมลมให้ถูกต้อง/เปลี่ยนยาง
@@ -462,6 +463,8 @@ do_command() {
         soh|cost)
             cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 "$cmd" \
                 --dir "$DATA" "$@" ;;
+        marks)   cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 marks \
+                     --dir "$DATA" ;;
         watch)
             local action=${1:-status}
             (cd "$DATA" && PYTHONPATH="$APP" python3 -m deepal_s05 watch \

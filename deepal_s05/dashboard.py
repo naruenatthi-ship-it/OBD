@@ -149,6 +149,52 @@ TOOLS = (
 )
 
 
+MARK_TOOL = ("แกะค่าใหม่", (
+    ("/mark", "list", "ทดสอบสวิตช์", "กดปุ่มตอนเปิดแอร์ ไฟ ประตู ให้ Pi จดเวลา",
+     "#c2410c"),))
+
+MARK_CSS = """
+.marks { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.marks .btn { min-height:52px; }
+.marks .btn.done { background:var(--accent); color:#fff; }
+#last { margin-top:12px; }
+"""
+
+
+def mark_page():
+    from . import marks
+    buttons = "".join(
+        '<button class="btn plain" data-e="%s">%s</button>'
+        % (html.escape(e, quote=True), html.escape(e)) for e in marks.EVENTS)
+    return (
+        '<section class="card"><p class="muted">กดปุ่มตอนที่ทำสิ่งนั้นกับรถ'
+        ' Pi จดเวลาให้ ทำทีละอย่าง เว้น 30 วินาที กดซ้ำหลายรอบ'
+        ' แล้วพิมพ์ <code>obd marks</code> ดูว่าค่าไหนเปลี่ยนตาม'
+        ' · ระหว่างขับ ให้คนนั่งข้างกด</p>'
+        '<div class="marks">%s</div>'
+        '<p style="margin-top:12px"><input id="other" placeholder="อย่างอื่น'
+        ' พิมพ์เอง" style="width:100%%;padding:12px;border-radius:12px;'
+        'border:1px solid var(--line);background:var(--surface);color:'
+        'var(--ink)"></p><button class="btn tonal" id="send" style="width:'
+        '100%%;margin-top:8px">จดอันที่พิมพ์</button>'
+        '<p class="muted" id="last"></p></section>'
+        "<script>"
+        "function mark(e,b){fetch('/mark',{method:'POST',headers:{"
+        "'Content-Type':'application/json','X-Requested-With':'deepal'},"
+        "body:JSON.stringify({event:e})}).then(function(r){return r.json()})"
+        ".then(function(d){document.getElementById('last').textContent="
+        "'จดแล้ว: '+e+' เวลา '+d.time.slice(11);if(b){b.classList.add('done');"
+        "setTimeout(function(){b.classList.remove('done')},800)}})"
+        ".catch(function(){document.getElementById('last').textContent="
+        "'ส่งไม่ได้ เช็กว่ามือถือต่อ Pi อยู่'})}"
+        "document.querySelectorAll('.marks .btn').forEach(function(b){"
+        "b.onclick=function(){mark(b.dataset.e,b)}});"
+        "document.getElementById('send').onclick=function(){"
+        "var v=document.getElementById('other').value.trim();"
+        "if(v){mark(v);document.getElementById('other').value=''}};"
+        "</script>" % buttons)
+
+
 WIFI_TOOL = ("ตั้งค่า", (
     ("/wifi", "wifi", "WiFi ของ Pi", "ต่อวงไหนอยู่ เพิ่ม ลบ เรียงลำดับ",
      "#2f6fdb"),))
@@ -156,7 +202,7 @@ WIFI_TOOL = ("ตั้งค่า", (
 
 def tools_page(local=False):
     parts = []
-    for section, tiles in TOOLS + ((WIFI_TOOL,) if local else ()):
+    for section, tiles in TOOLS + ((MARK_TOOL, WIFI_TOOL) if local else ()):
         parts.append('<div class="label">%s</div><div class="tiles">' % section)
         for href, ic, title, sub, color in tiles:
             parts.append(
@@ -647,8 +693,9 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 return
             # a custom header makes a browser ask first (CORS preflight),
             # so another web page cannot post here behind the owner's back
-            if not local or path != "/wifi" or \
-                    self.headers.get("X-Requested-With") != "deepal":
+            if not local or path not in ("/wifi", "/mark") or \
+                    self.headers.get("X-Requested-With") != "deepal" or \
+                    (path == "/mark" and not data_dir):
                 self.send_error(404)
                 return
             try:
@@ -658,6 +705,16 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 req = {}
             if not isinstance(req, dict):
                 req = {}
+            if path == "/mark":
+                from . import marks
+                event = str(req.get("event") or "").strip()
+                if not event:
+                    self.send_error(400)
+                    return
+                stamp = marks.add(data_dir, event)
+                self.send_body(json.dumps({"time": stamp}).encode("utf-8"),
+                               "application/json; charset=utf-8")
+                return
 
             def later(fn):
                 def go():
@@ -711,6 +768,10 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 self.html(ui.shell("WiFi ของ Pi", WIFI_BODY, back="/tools",
                                    active="tools", css=WIFI_CSS,
                                    sub="ดู เพิ่ม ลบ และเรียงลำดับ"))
+            elif local and data_dir and path == "/mark":
+                self.html(ui.shell("ทดสอบสวิตช์", mark_page(), back="/tools",
+                                   active="tools", css=MARK_CSS,
+                                   sub="กดตอนทำสิ่งนั้นกับรถ"))
             elif local and path == "/wifi.json":
                 self.send_body(json.dumps(wifi_status(), ensure_ascii=False)
                                .encode("utf-8"),
