@@ -327,3 +327,15 @@ def test_charge_probe_only_soon_after_the_car_was_awake(tmp_path,
     clock.t += autopilot.CHARGE_PROBE_WINDOW
     pilot.step()
     assert elm.reads == 2                        # too long since awake
+
+
+def test_watch_list_resumes_where_it_stopped(tmp_path):
+    # the Pi restarts at every stop: a long list must not start over
+    keys = [("700", "%04X" % (0xF100 + n)) for n in range(100)]
+    pos = str(tmp_path / ".watch_pos")
+    w = autopilot.WatchReader(keys, pos_path=pos)
+    elm = FakeElm([13.9])
+    for _ in range(autopilot.WATCH_SAVE_EVERY):
+        w.round(elm)
+    again = autopilot.WatchReader(keys, pos_path=pos)
+    assert again.pos == autopilot.WATCH_SAVE_EVERY * autopilot.WATCH_PER_ROUND

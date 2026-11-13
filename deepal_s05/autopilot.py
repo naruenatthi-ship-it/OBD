@@ -29,7 +29,8 @@ from .elm327 import ElmError, NegativeResponse, NoData
 WATCH_FILE = "watch_live.csv"  # DIDs still being worked out (header,did)
 CHARGE_PROBE_EVERY = 300.0     # seconds between "are you charging?" asks
 CHARGE_PROBE_WINDOW = 3 * 3600  # only this long after the car was awake
-WATCH_PER_ROUND = 8            # 32 DIDs: each one about every 4 rounds
+WATCH_PER_ROUND = 8
+WATCH_SAVE_EVERY = 10          # rounds between saves of the list position            # 32 DIDs: each one about every 4 rounds
 
 
 def load_watch(data_dir, private=()):
@@ -62,12 +63,24 @@ class WatchReader:
     """Reads a few of the watch DIDs each round, in turn, so the BMS values
     keep their pace and every watch DID still comes round every ~30 s.
     Raw hex goes into columns did_<header>_<did> (the `obd rec` names);
-    a DID the ECU refuses is skipped until the car wakes up again."""
+    a DID the ECU refuses is skipped until the car wakes up again.
 
-    def __init__(self, keys, per_round=WATCH_PER_ROUND):
+    The place in the list is kept in `pos_path`: the Pi restarts at every
+    stop, and starting from the top each time a long list never got past
+    its first ECUs."""
+
+    def __init__(self, keys, per_round=WATCH_PER_ROUND, pos_path=None):
         self.keys, self.per_round = list(keys), per_round
+        self.pos_path = pos_path
         self.pos = 0
+        if pos_path:
+            try:
+                with open(pos_path, encoding="utf-8") as f:
+                    self.pos = int(f.read().strip() or 0)
+            except (OSError, ValueError):
+                pass
         self.refused = set()
+        self.rounds = 0
 
     def wake(self):
         self.refused.clear()
@@ -86,6 +99,13 @@ class WatchReader:
             except NegativeResponse:
                 self.refused.add(key)
             except NoData:
+                pass
+        self.rounds += 1
+        if self.pos_path and self.rounds % WATCH_SAVE_EVERY == 0:
+            try:
+                with open(self.pos_path, "w", encoding="utf-8") as f:
+                    f.write(str(self.pos % max(len(self.keys), 1)))
+            except OSError:
                 pass
         return out
 
@@ -172,7 +192,9 @@ class Autopilot:
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
         # watch=None: the default list; [] turns it off
         keys = load_watch(data_dir, private) if watch is None else watch
-        self.watch = WatchReader(keys) if keys else None
+        self.watch = WatchReader(
+            keys, pos_path=os.path.join(data_dir, ".watch_pos")) \
+            if keys else None
         self.tyres = tyres.Monitor(data_dir, clock) if any(
             s.key == "motor_rpm" for s in signals) else None
         self.baselines = baselines or {}  # usual values, from checkups
