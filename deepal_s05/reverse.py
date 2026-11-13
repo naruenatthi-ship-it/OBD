@@ -21,8 +21,11 @@ def read_scan(path):
     out = {}
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(snapshot.no_nul(f)):
-            out[(row["header"].upper(), row["did"].upper())] = \
-                bytes.fromhex(row["raw"])
+            try:
+                raw = bytes.fromhex(row["raw"])
+            except (TypeError, ValueError):
+                continue  # hidden private value or a damaged row
+            out[(row["header"].upper(), row["did"].upper())] = raw
     return out
 
 

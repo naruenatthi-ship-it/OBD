@@ -82,3 +82,12 @@ def test_watch_list_ships_with_the_program():
                         "watch_live.csv")
     keys = reverse.read_scan(path)
     assert ("700", "F2F0") in keys and ("780", "FD0C") in keys
+
+
+def test_read_scan_takes_survey_results_with_hidden_values(tmp_path):
+    # survey_results.csv hides private values; `obd rec ... all` reads it
+    p = tmp_path / "survey_results.csv"
+    p.write_text("time,header,did,length,raw\n"
+                 "2026-10-16T23:00:00,700,F2F0,1,8F\n"
+                 "2026-10-16T23:00:01,706,F18C,4,(ซ่อน)\n")
+    assert reverse.read_scan(str(p)) == {("700", "F2F0"): b"\x8f"}

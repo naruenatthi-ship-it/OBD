@@ -1426,6 +1426,11 @@ def cmd_record(args):
             if did:
                 keys.append((header, did))
     keys = [k for k in keys if int(k[1], 16) not in PRIVATE_DIDS]
+    if args.skip_known:
+        # values the profile already decodes are logged as references
+        known = {(s.header.upper(), "%04X" % s.did)
+                 for s in args.vehicle.signals}
+        keys = [k for k in keys if k not in known]
     if not keys:
         print("ไม่มี DID ให้บันทึก ใช้ --dids-from ไฟล์จาก discover หรือ"
               " --dids 7A1:F2A0,761:F2C1")
@@ -2094,6 +2099,8 @@ def build_parser():
     rc.add_argument("--interval", type=float, default=2.0)
     rc.add_argument("--duration", type=float, help="วินาที")
     rc.add_argument("--note", help="หมายเหตุ เช่น ขับในเมือง")
+    rc.add_argument("--skip-known", action="store_true",
+                    help="ข้าม DID ที่โปรแกรมอ่านเป็นค่าอยู่แล้ว (เซลล์ อุณหภูมิแพ็ก ฯลฯ)")
     rc.add_argument("--csv", default="record.csv")
     rc.set_defaults(func=cmd_record)
 
