@@ -103,5 +103,7 @@ def test_watch_all_takes_survey_finds_minus_known(tmp_path):
         "2026-10-16T23:00:02,706,F18C,4,(ซ่อน)\n")
     assert main(["watch", "all", "--dir", str(tmp_path)]) == 0
     assert autopilot.load_watch(str(tmp_path)) == [("700", "F2F3")]
+    assert main(["watch", "all", "7A1", "--dir", str(tmp_path)]) == 0
+    assert autopilot.load_watch(str(tmp_path)) == []
     assert main(["watch", "reset", "--dir", str(tmp_path)]) == 0
     assert len(autopilot.load_watch(str(tmp_path))) > 1   # default list

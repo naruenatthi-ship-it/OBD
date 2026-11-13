@@ -1810,6 +1810,9 @@ def cmd_watch(args):
                  for s in args.vehicle.signals}
         keys = [k for k in sorted(reverse.read_scan(source))
                 if k not in known and int(k[1], 16) not in PRIVATE_DIDS]
+        if args.headers:
+            wanted = {h.strip().upper() for h in args.headers.split(",")}
+            keys = [k for k in keys if k[0] in wanted]
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["header", "did"])
@@ -2412,6 +2415,8 @@ def build_parser():
     wa.add_argument("action", nargs="?", default="status",
                     choices=["status", "all", "reset"],
                     help="all = ทุกค่าที่ survey เจอ · reset = รายการเริ่มต้น")
+    wa.add_argument("headers", nargs="?",
+                    help="เฉพาะกล่องเหล่านี้ เช่น 7A1,7A7,7A4 (ใช้กับ all)")
     wa.add_argument("--dir", default=".", help="โฟลเดอร์ข้อมูล")
     wa.set_defaults(func=cmd_watch)
 
