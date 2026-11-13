@@ -3,6 +3,7 @@
 
 import csv
 import datetime
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -189,15 +190,27 @@ class CsvLog:
         self.file.flush()
 
     def _add_columns(self, missing):
+        """Rewrite the file with the new columns, into a temporary file
+        that then replaces it: a power cut mid-rewrite keeps the old file.
+        A row longer than the header (the end of a row cut by a power cut,
+        joined to the next one) loses its extra fields, not the rest of
+        the file: on 13 Nov that one row stopped the rewrite and four
+        hours of a 4 MB recording were gone."""
         self.file.close()
         with open(self.path, newline="", encoding="utf-8",
                   errors="replace") as f:
             rows = list(csv.DictReader(no_nul(f)))
         fields = list(self.writer.fieldnames) + missing
-        with open(self.path, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fields, restval="")
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fields, restval="", extrasaction="ignore")
             w.writeheader()
-            w.writerows(rows)
+            for row in rows:
+                row.pop(None, None)
+                w.writerow(row)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.path)
         self.file = open(self.path, "a", newline="", encoding="utf-8")
         self.writer = csv.DictWriter(self.file, fields, restval="",
                                      extrasaction="ignore")

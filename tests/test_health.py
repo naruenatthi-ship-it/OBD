@@ -155,3 +155,21 @@ def test_eco_table_ac_split():
     assert abs(on[0]["kw"] - off[0]["kw"] - 1.0) < 0.01
     assert abs(off[80]["kwh_100"] - 8.3 / 80 * 100) < 0.1
     assert abs(on[100]["kwh_100"] - off[100]["kwh_100"] - 1.0) < 0.1
+
+
+def test_csvlog_new_column_survives_a_row_cut_by_a_power_cut(tmp_path):
+    # 13 Nov: one line held a row plus the start of the next (the Pi lost
+    # power mid-write); adding a column then truncated the file there
+    path = tmp_path / "drive.csv"
+    path.write_text("time,soc\n"
+                    "2026-11-13T12:58:26,21\n"
+                    "2026-11-13T12:58:34,22,2026-11-13T12:58:4\n"
+                    "\0\0\0" "2026-11-13T13:02:45,8\n"
+                    "2026-11-13T17:29:53,54\n")
+    with CsvLog(str(path)) as log:
+        log.write(Snapshot(1_800_000_000.0, {"soc": 50, "bms_temp_1": 38}))
+    import csv
+    rows = list(csv.DictReader(open(path, encoding="utf-8")))
+    assert [r["soc"] for r in rows] == ["21", "22", "8", "54", "50"]
+    assert rows[-1]["bms_temp_1"] == "38"
+    assert not (tmp_path / "drive.csv.tmp").exists()
