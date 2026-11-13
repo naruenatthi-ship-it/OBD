@@ -5,6 +5,14 @@ decides what to do: above `wake_v` the DC-DC converter is running, so the
 car is awake and the BMS is polled, logged and checked against the alert
 rules; below it nothing is sent to the car and only the 12 V voltage is
 logged now and then, so the Pi never keeps the car awake.
+
+The one exception is charging: with the car off the DC-DC converter does
+not run, the 12 V battery rests near 12.6 V and the car looks asleep while
+the BMS is busy charging. For CHARGE_PROBE_WINDOW after the car was last
+awake (or the Pi started), the pack current is asked once every
+CHARGE_PROBE_EVERY; if it shows charging the round is logged like an awake
+one until the charge ends. The first time the BMS does not answer, the
+probing stops until the car is next awake.
 """
 
 import datetime
@@ -19,6 +27,8 @@ from . import (alerts, analysis, cost, dashboard, identity, pids, snapshot,
 from .elm327 import ElmError, NegativeResponse, NoData
 
 WATCH_FILE = "watch_live.csv"  # DIDs still being worked out (header,did)
+CHARGE_PROBE_EVERY = 300.0     # seconds between "are you charging?" asks
+CHARGE_PROBE_WINDOW = 3 * 3600  # only this long after the car was awake
 WATCH_PER_ROUND = 8            # 32 DIDs: each one about every 4 rounds
 
 
@@ -177,6 +187,11 @@ class Autopilot:
         os.makedirs(data_dir, exist_ok=True)
         self.survey = survey.Survey(data_dir, private, clock)
         self.still_since = None
+        self.charging = False       # charging with the car off
+        self.awake_seen = clock()   # last awake round, or the Pi's start
+        self.last_probe = None
+        self.probe_off = False      # the BMS did not answer: wait for a wake
+        self.last_values = {}
 
     # -- helpers ---------------------------------------------------------
     def path(self, name):
@@ -236,11 +251,47 @@ class Autopilot:
             return self.retry
 
         if v12 >= self.wake_v:
+            self.probe_off = False
             return self.awake_round(now, v12)
+        if not self.charging and self.charge_probe(now):
+            self.charging = True
+        if self.charging:
+            wait = self.awake_round(now, v12)
+            current = self.last_values.get("pack_current")
+            if current is None or current > -1:
+                self.charging = False   # done: the next round sleeps
+            else:
+                self.state.update(status="กำลังชาร์จ (รถไม่ได้เปิด) กำลังบันทึก")
+            return wait
         return self.asleep_round(now, v12)
+
+    def charge_probe(self, now):
+        """With the car looking asleep: one pack current request, at most
+        every CHARGE_PROBE_EVERY and only within CHARGE_PROBE_WINDOW of the
+        car being awake. True when the pack is taking charge."""
+        if self.probe_off or now - self.awake_seen > CHARGE_PROBE_WINDOW:
+            return False
+        if self.last_probe is not None and \
+                now - self.last_probe < CHARGE_PROBE_EVERY:
+            return False
+        sig = next((s for s in self.signals if s.key == "pack_current"),
+                   None)
+        if sig is None:
+            return False
+        self.last_probe = now
+        try:
+            current = sig.value(self.elm.read_did(sig.header, sig.did),
+                                self.capacity)
+        except (ElmError, OSError):
+            current = None
+        if current is None:
+            self.probe_off = True
+            return False
+        return current < -2  # charging is negative on the S05
 
     def awake_round(self, now, v12):
         self.low_since = None
+        self.awake_seen = now
         if self.awake_since is None:
             self.awake_since = now
             # `obd stop` paused the survey until the car is started again;
@@ -259,6 +310,7 @@ class Autopilot:
             self.state.update(status="อ่านค่าไม่ได้ (%s)" % e)
             return self.retry
         values = snap.values
+        self.last_values = values
         if values.get("soc") is None:
             self.state.update(time=snap.time, values=values, arrays={},
                               alerts=[], status="รถตื่นแต่ BMS ยังไม่ตอบ")

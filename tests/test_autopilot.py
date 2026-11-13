@@ -260,3 +260,70 @@ def test_watch_list_from_the_data_folder(tmp_path):
     pilot = autopilot.Autopilot(lambda: None, [], [], str(tmp_path),
                                 watch=[])
     assert pilot.watch is None
+
+
+class ChargingElm(FakeElm):
+    """12 V resting at 12.6 V while the BMS answers the pack current."""
+    def __init__(self, current):
+        super().__init__([12.6])
+        self.current = current
+        self.reads = 0
+
+    def read_did(self, header, did):
+        from deepal_s05.elm327 import NoData
+        self.reads += 1
+        if self.current is None:
+            raise NoData("NO DATA")
+        raw = int(self.current * 10) + 6015    # F229 is (raw - 6015) / 10
+        return raw.to_bytes(2, "big")
+
+
+def make_probe(tmp_path, monkeypatch, current, values):
+    from deepal_s05 import pids
+    clock = Clock()
+    elm = ChargingElm(current)
+    taken = []
+
+    def take(e, signals, arrays, capacity, slow=None):
+        taken.append(clock.t)
+        return Snapshot(clock.t, dict(values))
+    monkeypatch.setattr(autopilot.snapshot, "take", take)
+    sig = next(s for s in pids.SIGNALS if s.key == "pack_current")
+    pilot = autopilot.Autopilot(lambda: elm, [sig], [], str(tmp_path),
+                                clock=clock, watch=[])
+    return pilot, elm, clock, taken
+
+
+def test_charging_with_the_car_off_is_logged(tmp_path, monkeypatch):
+    pilot, elm, clock, taken = make_probe(
+        tmp_path, monkeypatch, -150.0,
+        {"soc": 40, "pack_current": -150.0, "aux_12v": 12.6})
+    assert pilot.step() == pilot.interval        # probe said charging
+    assert pilot.charging and len(taken) == 1
+    assert any(f.startswith("drive_") for f in os.listdir(tmp_path))
+    clock.t += 5
+    pilot.step()
+    assert len(taken) == 2 and elm.reads == 1    # no second probe needed
+
+
+def test_charge_probe_stops_when_the_bms_is_asleep(tmp_path, monkeypatch):
+    pilot, elm, clock, taken = make_probe(
+        tmp_path, monkeypatch, None, {"soc": 40, "pack_current": 0.0})
+    assert pilot.step() == pilot.asleep_poll
+    assert elm.reads == 1 and taken == []
+    clock.t += autopilot.CHARGE_PROBE_EVERY + 1
+    pilot.step()
+    assert elm.reads == 1                        # gave up until a wake
+
+
+def test_charge_probe_only_soon_after_the_car_was_awake(tmp_path,
+                                                       monkeypatch):
+    pilot, elm, clock, taken = make_probe(
+        tmp_path, monkeypatch, 0.5, {"soc": 40, "pack_current": 0.5})
+    pilot.step()                                 # parked, not charging
+    clock.t += autopilot.CHARGE_PROBE_EVERY + 1
+    pilot.step()
+    assert elm.reads == 2 and taken == []
+    clock.t += autopilot.CHARGE_PROBE_WINDOW
+    pilot.step()
+    assert elm.reads == 2                        # too long since awake
