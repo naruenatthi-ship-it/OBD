@@ -1180,9 +1180,9 @@ function renderDc(dc) {
   if (!dc) return;
   box.className = 'dc ' + dc.state;
   var eta = dc.reached ? 'ถึง '+dc.target+'% แล้ว' : (dc.eta_min===null ? 'ยังประเมินไม่ได้' : 'ถึง '+dc.target+'% อีก ~'+Math.round(dc.eta_min)+' นาที');
-  box.innerHTML = '<b>⚡ ชาร์จเร็ว DC</b><div class="big"><div>'+f(dc.accept_kw,1)+' kW<small>แบตรับได้ตอนนี้ (F233)</small></div><div>'+f(dc.supply_kw,1)+' kW<small>ตู้จ่ายจริง</small></div></div>'+
+  box.innerHTML = '<b>⚡ ชาร์จเร็ว DC</b><div class="big"><div>'+f(dc.supply_kw,1)+' kW<small>ตู้จ่ายตอนนี้</small></div><div>'+f(dc.avg_kw,1)+' kW<small>เฉลี่ย 2 นาที</small></div></div>'+
     '<p>'+esc(dc.text)+'</p><p>'+eta+' · ชาร์จแล้ว '+f(dc.kwh,1)+' kWh ≈ <b>'+f(dc.baht,0)+'</b> บาท (ที่ '+f(dc.price,2)+' บาท/kWh)</p>'+
-    '<p class="note">เวลาประเมินจากกำลังเฉลี่ย 2 นาทีล่าสุด จริงจะนานกว่านี้เมื่อ SOC สูงเพราะกำลังลดลง · F233 ยังเป็นค่าที่รอยืนยัน</p>';
+    '<p class="note">เวลาประเมินจากกำลังเฉลี่ย 2 นาทีล่าสุด จริงจะนานกว่านี้เมื่อ SOC สูงเพราะกำลังลดลง</p>';
 }
 
 function renderPack(v, info, cells) {

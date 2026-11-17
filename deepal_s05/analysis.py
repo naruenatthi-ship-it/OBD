@@ -548,9 +548,8 @@ def eco_table(groups, window_s=30, spread_kmh=6):
 
 
 class DcSession:
-    """Live view of a DC fast charge for the assistant card: what the
-    battery will accept (F233) against what the station delivers, the time
-    to a target SOC and the cost so far. update() is called with every
+    """Live view of a DC fast charge for the assistant card: the power the
+    station delivers, the time to a target SOC and the cost so far. update() is called with every
     snapshot; it returns None when the car is not fast charging."""
 
     END_GAP_S = 120  # no DC sample for this long = session over
@@ -596,15 +595,9 @@ class DcSession:
                 "price": self.price, "temp": temp}
 
     def _verdict(self, accept, avg, temp):
-        hot = temp is not None and temp >= self.hot
-        if accept is None or accept <= 0:
-            return "unknown", "อ่านกำลังที่แบตรับได้ (F233) ไม่ได้"
-        if avg < 0.75 * accept:
-            return "station", ("ตู้จ่ายน้อยกว่าที่แบตรับได้ (%.0f จาก %.0f kW)"
-                               " ช้าเพราะตู้ ลองย้ายหัวชาร์จ/ตู้อื่น"
-                               % (avg, accept))
-        if hot:
-            return "battery_hot", ("แบตรับได้แค่ %.0f kW และแบตร้อน %.0f °C"
-                                   " ช้าเพราะแบตร้อน" % (accept, temp))
-        return "battery", ("แบตรับได้ %.0f kW เต็มที่แล้ว ตู้จ่ายเต็มตามที่แบตรับ"
-                           % accept)
+        # F233 is not what the battery will take: on 13 Nov a station put
+        # 79 kW in while it read 47.3, so it is only shown, never judged on
+        if temp is not None and temp >= self.hot:
+            return "battery_hot", ("ชาร์จเฉลี่ย %.0f kW · แบตร้อน %.0f °C"
+                                   " BMS อาจลดกำลังลงเอง" % (avg, temp))
+        return "charging", "ชาร์จเฉลี่ย %.0f kW" % avg

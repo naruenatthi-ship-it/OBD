@@ -325,9 +325,9 @@ def test_dc_session_verdicts():
             "dc_accept_kw": 60}
     assert s.update(0, {"soc": 50}) is None
     r = s.update(10, base)
-    assert r["state"] == "station"
-    r = s.update(70, dict(base, dc_supply_kw=58))
-    assert r["state"] in ("station", "battery")
+    assert r["state"] == "charging"     # F233 is shown, not judged on
+    r = s.update(70, dict(base, dc_supply_kw=79, dc_accept_kw=47.3))
+    assert r["state"] == "charging" and "kW" in r["text"]
     s = DcSession(56.1, dc_price=8.0)
     hot = dict(base, dc_supply_kw=34, dc_accept_kw=33.7, batt_temp_max=45)
     for t in range(0, 3601, 60):
