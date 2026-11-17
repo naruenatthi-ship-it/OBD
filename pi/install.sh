@@ -76,6 +76,9 @@ sed "s/@USER@/$USER_NAME/" "$APP/pi/deepal-obd.service" | \
 sudo cp "$APP/pi/deepal-hotspot.service" "$APP/pi/deepal-hotspot.timer" \
     /etc/systemd/system/
 sudo chmod +x "$APP/pi/hotspot-first.sh"
+sudo cp "$APP/pi/deepal-clock.service" "$APP/pi/deepal-clock-save.service" \
+    "$APP/pi/deepal-clock-save.timer" /etc/systemd/system/
+sudo chmod +x "$APP/pi/deepal-clock.sh"
 if [ -d /etc/NetworkManager/dispatcher.d ]; then
     # copies the data to the VPS as soon as WiFi connects (once set up)
     sudo install -m 755 "$APP/pi/deepal-vps-dispatch" \
@@ -90,6 +93,9 @@ fi
 sudo systemctl daemon-reload
 sudo systemctl enable deepal-obd
 sudo systemctl enable --now deepal-hotspot.timer
+# no clock battery: never start earlier than the last known time
+sudo systemctl enable deepal-clock.service
+sudo systemctl enable --now deepal-clock-save.timer
 
 echo
 echo "ติดตั้งเสร็จแล้ว ขั้นต่อไป:"

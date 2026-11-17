@@ -1,0 +1,6 @@
+[Unit]
+Description=Keep the last known time (Deepal S05 OBD)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/deepal-obd/pi/deepal-clock.sh save

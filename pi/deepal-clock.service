@@ -1,0 +1,13 @@
+[Unit]
+Description=Start the clock no earlier than the last known time (Deepal S05 OBD)
+DefaultDependencies=no
+After=local-fs.target
+Before=time-sync.target deepal-obd.service
+Wants=time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/deepal-obd/pi/deepal-clock.sh restore
+
+[Install]
+WantedBy=sysinit.target
