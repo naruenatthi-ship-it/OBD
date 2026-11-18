@@ -117,6 +117,84 @@ def restore(data_dir):
             os.remove(path)
 
 
+PLAN_FILE = ".mark_plan.json"
+LEAD_S = 45            # from pressing start to the first step
+
+
+def start_plan(data_dir, index, phone_offset=0.0, now=None):
+    """A guided test the Pi times itself, so the phone can be locked: the
+    watch list is swapped for the test's ECUs, every step gets a time and
+    is written to marks.csv in advance, and the plan is kept until it ends
+    (then finish_if_due puts the list back). phone_offset = Pi clock minus
+    phone clock, so the page can show the times on the phone's clock."""
+    import json
+    import time
+    now = time.time() if now is None else now
+    name, steps, headers = TESTS[index]
+    cancel_plan(data_dir, now)
+    n = prepare(data_dir, headers)
+    wait = step_wait(data_dir)
+    t = now + max(LEAD_S, wait)
+    timeline = []
+    for _ in range(ROUNDS):
+        for step in steps:
+            timeline.append([t, step])
+            t += wait
+    for when, step in timeline:
+        add(data_dir, step, when)
+    plan = {"name": name, "n": n, "wait": wait, "start": now, "end": t,
+            "first": steps[-1], "steps": timeline,
+            "offset": phone_offset}
+    with open(os.path.join(data_dir, PLAN_FILE), "w", encoding="utf-8") as f:
+        json.dump(plan, f, ensure_ascii=False)
+    return plan
+
+
+def current_plan(data_dir):
+    import json
+    try:
+        with open(os.path.join(data_dir, PLAN_FILE), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def finish_if_due(data_dir, now):
+    """Called by autopilot every round: put the watch list back once the
+    plan's last step has been held. True while a plan runs."""
+    plan = current_plan(data_dir)
+    if plan is None:
+        return False
+    if now <= plan["end"]:
+        return True
+    restore(data_dir)
+    try:
+        os.remove(os.path.join(data_dir, PLAN_FILE))
+    except OSError:
+        pass
+    return False
+
+
+def cancel_plan(data_dir, now):
+    """Stop a running plan: drop its marks still to come, put the list
+    back."""
+    plan = current_plan(data_dir)
+    if plan is None:
+        return
+    path = os.path.join(data_dir, MARKS_FILE)
+    kept = [(t, e) for t, e in read_marks(data_dir) if t.timestamp() <= now]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["time", "event"])
+        for t, e in kept:
+            w.writerow([t.isoformat(timespec="seconds"), e])
+    restore(data_dir)
+    try:
+        os.remove(os.path.join(data_dir, PLAN_FILE))
+    except OSError:
+        pass
+
+
 # the buttons on the /mark page, in pairs where there is an on and an off
 EVENTS = (
     "แอร์ เปิด", "แอร์ ปิด", "แอร์ ลดอุณหภูมิ", "แอร์ เพิ่มอุณหภูมิ",

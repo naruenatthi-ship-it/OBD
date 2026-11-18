@@ -441,6 +441,8 @@ class Autopilot:
         """Watch DIDs per round: many more while a switch test runs (a mark
         was made on the /mark page in the last FOCUS_S seconds)."""
         from . import marks
+        if marks.finish_if_due(self.data_dir, now):
+            return marks.FOCUS_PER_ROUND        # a timed test is running
         try:
             age = now - os.path.getmtime(self.path(marks.MARKS_FILE))
         except OSError:

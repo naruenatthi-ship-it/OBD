@@ -130,3 +130,29 @@ def test_autopilot_picks_up_a_new_watch_list(tmp_path):
     os.utime(tmp_path / "watch_live.csv", (st.st_atime, st.st_mtime + 5))
     pilot.reload_watch()
     assert pilot.watch.keys == [("780", "FD1A")]
+
+
+def test_timed_plan_runs_on_the_pi_and_cleans_up(tmp_path):
+    from deepal_s05 import autopilot
+    d = str(tmp_path)
+    (tmp_path / "survey_results.csv").write_text(
+        "time,header,did,length,raw\n2026-10-16T23:00:00,7A7,FD18,2,0000\n")
+    (tmp_path / "watch_live.csv").write_text("header,did\n700,F2F3\n")
+    now = T0.timestamp()
+    index = [n for n, _, _ in marks.TESTS].index("โหมดขับ")
+    plan = marks.start_plan(d, index, phone_offset=120, now=now)
+    assert plan["offset"] == 120 and plan["first"] == "โหมด Eco"
+    assert len(plan["steps"]) == 2 * marks.ROUNDS
+    assert plan["steps"][0][0] >= now + marks.LEAD_S
+    assert len(marks.read_marks(d)) == len(plan["steps"])  # written ahead
+    assert autopilot.load_watch(d) == [("7A7", "FD18")]
+    assert marks.finish_if_due(d, now + 60) is True
+    assert marks.finish_if_due(d, plan["end"] + 1) is False
+    assert autopilot.load_watch(d) == [("700", "F2F3")]     # put back
+    assert marks.current_plan(d) is None
+    # cancelled half way: the steps still to come are dropped
+    later = plan["end"] + 600
+    plan = marks.start_plan(d, index, now=later)
+    marks.cancel_plan(d, plan["steps"][1][0])
+    assert len(marks.read_marks(d)) == len(plan["steps"]) + 2
+    assert autopilot.load_watch(d) == [("700", "F2F3")]
