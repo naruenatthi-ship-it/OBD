@@ -158,20 +158,115 @@ MARK_CSS = """
 .marks .btn { min-height:52px; }
 .marks .btn.done { background:var(--accent); color:#fff; }
 #last { margin-top:12px; }
+#guide { text-align:center; padding:18px 8px; border-radius:16px;
+  background:var(--surface); border:1px solid var(--line); margin-top:12px; }
+#guide .what { font-size:26px; font-weight:700; margin:6px 0; }
+#guide .count { font-size:56px; font-weight:800; line-height:1.1; }
+#guide.go { background:var(--accent); color:#fff; }
+"""
+
+MARK_JS = r"""
+var WAIT = %(wait)d, PREP = 5, ROUNDS = 3, TESTS = %(tests)s;
+var stopped = true, timer = null;
+function el(id){ return document.getElementById(id); }
+function mark(e, b, done){
+  fetch('/mark', {method:'POST', headers:{'Content-Type':'application/json',
+    'X-Requested-With':'deepal'}, body:JSON.stringify({event:e})})
+  .then(function(r){ return r.json(); }).then(function(d){
+    el('last').textContent = 'จดแล้ว: '+e+' เวลา '+d.time.slice(11);
+    if (b){ b.classList.add('done'); setTimeout(function(){ b.classList.remove('done'); }, 800); }
+    if (done) done(true);
+  }).catch(function(){
+    el('last').textContent = 'ส่งไม่ได้ เช็กว่ามือถือต่อ Pi อยู่';
+    if (done) done(false);
+  });
+}
+function show(cls, top, what, count){
+  var g = el('guide'); g.hidden = false; g.className = cls;
+  g.innerHTML = '<div class="muted">'+top+'</div><div class="what">'+what+
+    '</div><div class="count">'+count+'</div>';
+}
+function countdown(sec, tick, end){
+  var left = sec; tick(left);
+  timer = setInterval(function(){
+    if (stopped){ clearInterval(timer); return; }
+    left -= 1;
+    if (left <= 0){ clearInterval(timer); end(); } else tick(left);
+  }, 1000);
+}
+function result(){
+  var o = el('out'); o.textContent = 'กำลังคำนวณ...';
+  fetch('/mark.txt', {cache:'no-store'}).then(function(r){ return r.text(); })
+  .then(function(t){ o.textContent = t; o.scrollIntoView({behavior:'smooth'}); })
+  .catch(function(){ o.textContent = 'โหลดไม่ได้ เช็กว่ามือถือต่อ Pi อยู่'; });
+}
+function run(steps, name){
+  var plan = [];
+  for (var r = 1; r <= ROUNDS; r++)
+    for (var i = 0; i < steps.length; i++) plan.push([steps[i], r]);
+  stopped = false; el('stop').hidden = false;
+  show('', name, 'เริ่ม…', '');
+  el('guide').scrollIntoView({behavior:'smooth', block:'center'});
+  function next(k){
+    if (stopped) return;
+    if (k >= plan.length){
+      show('', name, 'เสร็จแล้ว', '✓'); el('stop').hidden = true;
+      stopped = true; result(); return;
+    }
+    var step = plan[k][0], top = name+' · รอบ '+plan[k][1]+'/'+ROUNDS;
+    countdown(PREP, function(n){ show('', top+' · เตรียม', step, n); }, function(){
+      show('go', top, 'ทำเลย: '+step, '!');
+      if (navigator.vibrate) navigator.vibrate(300);
+      mark(step, null, function(){
+        countdown(WAIT, function(n){
+          show('', top+' · ทำแล้ว ค้างไว้ รอ Pi อ่านค่า', step, n);
+        }, function(){ next(k+1); });
+      });
+    });
+  }
+  next(0);
+}
+document.querySelectorAll('.tests .btn').forEach(function(b, i){
+  b.onclick = function(){ if (stopped) run(TESTS[i][1], TESTS[i][0]); };
+});
+el('stop').onclick = function(){
+  stopped = true; clearInterval(timer); el('stop').hidden = true;
+  show('', 'หยุดแล้ว', 'กดหัวข้อเพื่อเริ่มใหม่', '–');
+};
+document.querySelectorAll('.manual .btn').forEach(function(b){
+  b.onclick = function(){ mark(b.dataset.e, b); };
+});
+el('send').onclick = function(){
+  var v = el('other').value.trim();
+  if (v){ mark(v); el('other').value = ''; }
+};
+el('res').onclick = result;
 """
 
 
-def mark_page():
+def mark_page(data_dir):
     from . import marks
+    wait = marks.step_wait(data_dir)
+    tests = "".join(
+        '<button class="btn tonal">%s</button>' % html.escape(name)
+        for name, _ in marks.TESTS)
     buttons = "".join(
         '<button class="btn plain" data-e="%s">%s</button>'
         % (html.escape(e, quote=True), html.escape(e)) for e in marks.EVENTS)
+    js = MARK_JS % {"wait": wait, "tests": json.dumps(
+        [[n, list(st)] for n, st in marks.TESTS], ensure_ascii=False)}
     return (
-        '<section class="card"><p class="muted">กดปุ่มตอนที่ทำสิ่งนั้นกับรถ'
-        ' Pi จดเวลาให้ ทำทีละอย่าง เว้น 30 วินาที กดซ้ำหลายรอบ'
-        ' แล้วพิมพ์ <code>obd marks</code> ดูว่าค่าไหนเปลี่ยนตาม'
-        ' · ระหว่างขับ ให้คนนั่งข้างกด</p>'
-        '<div class="marks">%s</div>'
+        '<section class="card"><b>ทดสอบแบบนำทาง</b><p class="muted">'
+        'เลือกหัวข้อ หน้าเว็บจะนับถอยหลังบอกว่าทำอะไรตอนไหน แล้วจดเวลาให้เอง'
+        ' ทำ 3 รอบ (แต่ละขั้นรอ %d วินาทีให้ Pi อ่านค่า) จบแล้วแสดงผลเอง'
+        ' · จอดรถ READY เกียร์ P · ระหว่างนี้ Pi อ่านค่าเร็วขึ้นเอง</p>'
+        '<div class="marks tests">%s</div>'
+        '<div id="guide" hidden></div>'
+        '<button class="btn plain" id="stop" hidden style="width:100%%;'
+        'margin-top:10px">หยุด</button></section>'
+        '<section class="card"><b>กดเอง</b><p class="muted">กดปุ่มตอนที่ทำ'
+        'สิ่งนั้นกับรถ เว้นห่างกันแล้วกดซ้ำหลายรอบ · ระหว่างขับให้คนนั่งข้างกด'
+        '</p><div class="marks manual">%s</div>'
         '<p style="margin-top:12px"><input id="other" placeholder="อย่างอื่น'
         ' พิมพ์เอง" style="width:100%%;padding:12px;border-radius:12px;'
         'border:1px solid var(--line);background:var(--surface);color:'
@@ -179,30 +274,10 @@ def mark_page():
         '100%%;margin-top:8px">จดอันที่พิมพ์</button>'
         '<p class="muted" id="last"></p></section>'
         '<section class="card"><b>ผล</b><p class="muted">ค่าไหนเปลี่ยนตามปุ่มที่กด'
-        ' (กดซ้ำอย่างละ 3 รอบ แล้วรอ 2–3 นาทีให้ Pi อ่านค่าครบ ก่อนดูผล)</p>'
-        '<button class="btn tonal" id="res" style="width:100%%">ดูผล</button>'
-        '<pre id="out" style="white-space:pre-wrap;font-size:13px;margin-top:'
-        '10px"></pre></section>'
-        "<script>"
-        "function mark(e,b){fetch('/mark',{method:'POST',headers:{"
-        "'Content-Type':'application/json','X-Requested-With':'deepal'},"
-        "body:JSON.stringify({event:e})}).then(function(r){return r.json()})"
-        ".then(function(d){document.getElementById('last').textContent="
-        "'จดแล้ว: '+e+' เวลา '+d.time.slice(11);if(b){b.classList.add('done');"
-        "setTimeout(function(){b.classList.remove('done')},800)}})"
-        ".catch(function(){document.getElementById('last').textContent="
-        "'ส่งไม่ได้ เช็กว่ามือถือต่อ Pi อยู่'})}"
-        "document.querySelectorAll('.marks .btn').forEach(function(b){"
-        "b.onclick=function(){mark(b.dataset.e,b)}});"
-        "document.getElementById('send').onclick=function(){"
-        "var v=document.getElementById('other').value.trim();"
-        "if(v){mark(v);document.getElementById('other').value=''}};"
-        "document.getElementById('res').onclick=function(){"
-        "var o=document.getElementById('out');o.textContent='กำลังคำนวณ...';"
-        "fetch('/mark.txt',{cache:'no-store'}).then(function(r){return r.text()})"
-        ".then(function(t){o.textContent=t})"
-        ".catch(function(){o.textContent='โหลดไม่ได้ เช็กว่ามือถือต่อ Pi อยู่'})};"
-        "</script>" % buttons)
+        '</p><button class="btn tonal" id="res" style="width:100%%">ดูผล'
+        '</button><pre id="out" style="white-space:pre-wrap;font-size:13px;'
+        'margin-top:10px"></pre></section>'
+        '<script>%s</script>' % (wait, tests, buttons, js))
 
 
 WIFI_TOOL = ("ตั้งค่า", (
@@ -783,7 +858,7 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 self.send_body(marks.report(data_dir).encode("utf-8"),
                                "text/plain; charset=utf-8")
             elif local and data_dir and path == "/mark":
-                self.html(ui.shell("ทดสอบสวิตช์", mark_page(), back="/tools",
+                self.html(ui.shell("ทดสอบสวิตช์", mark_page(data_dir), back="/tools",
                                    active="tools", css=MARK_CSS,
                                    sub="กดตอนทำสิ่งนั้นกับรถ"))
             elif local and path == "/wifi.json":

@@ -18,6 +18,35 @@ MARKS_FILE = "marks.csv"
 WINDOW_S = 90      # a reading this close before / after a mark counts
 QUIET_S = 600      # changes this far from any mark count as noise
 
+FOCUS_S = 900          # after a mark, autopilot reads the watch list fast
+FOCUS_PER_ROUND = 40   # watch DIDs per round meanwhile (normally 8)
+ROUND_S = 6.0          # about how long one autopilot round takes
+
+# guided tests on the /mark page: the steps are done in turn, 3 times
+TESTS = (
+    ("แอร์ เปิด/ปิด", ("แอร์ เปิด", "แอร์ ปิด")),
+    ("อุณหภูมิแอร์", ("แอร์ ลดอุณหภูมิ", "แอร์ เพิ่มอุณหภูมิ")),
+    ("พัดลมแอร์", ("พัดลมแอร์ แรงขึ้น", "พัดลมแอร์ เบาลง")),
+    ("ไฟหน้า", ("ไฟหน้า เปิด", "ไฟหน้า ปิด")),
+    ("ที่ปัดน้ำฝน", ("ที่ปัดน้ำฝน เปิด", "ที่ปัดน้ำฝน ปิด")),
+    ("ประตูคนขับ", ("ประตูคนขับ เปิด", "ประตูคนขับ ปิด")),
+    ("ฝาท้าย", ("ฝาท้าย เปิด", "ฝาท้าย ปิด")),
+    ("พวงมาลัย", ("พวงมาลัย สุดซ้าย", "พวงมาลัย สุดขวา")),
+    ("โหมดขับ", ("โหมด Sport", "โหมด Eco")),
+    ("ระดับชาร์จกลับ", ("ชาร์จกลับ มาก", "ชาร์จกลับ น้อย")),
+    ("เบรก (จอดอยู่)", ("เหยียบเบรก", "ปล่อยเบรก")),
+)
+
+
+def step_wait(data_dir):
+    """Seconds to wait after each step: long enough for the Pi to read
+    the whole watch list twice at the fast pace."""
+    from . import autopilot
+    n = len(autopilot.load_watch(data_dir))
+    rounds = -(-n // FOCUS_PER_ROUND) if n else 1
+    return int(max(30, 2 * rounds * ROUND_S + 10))
+
+
 # the buttons on the /mark page, in pairs where there is an on and an off
 EVENTS = (
     "แอร์ เปิด", "แอร์ ปิด", "แอร์ ลดอุณหภูมิ", "แอร์ เพิ่มอุณหภูมิ",

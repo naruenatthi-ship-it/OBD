@@ -118,12 +118,13 @@ class WatchReader:
     def wake(self):
         self.refused.clear()
 
-    def round(self, elm):
+    def round(self, elm, per_round=None):
+        per_round = per_round or self.per_round
         live = [k for k in self.keys if k not in self.refused]
         # every column from the first row: the day's file is rewritten
         # once for new columns, not once per DID
         out = {"did_%s_%s" % k: "" for k in live}
-        for _ in range(min(self.per_round, len(live))):
+        for _ in range(min(per_round, len(live))):
             key = live[self.pos % len(live)]
             self.pos += 1
             try:
@@ -346,6 +347,16 @@ class Autopilot:
             return False
         return current < -2  # charging is negative on the S05
 
+    def watch_pace(self, now):
+        """Watch DIDs per round: many more while a switch test runs (a mark
+        was made on the /mark page in the last FOCUS_S seconds)."""
+        from . import marks
+        try:
+            age = now - os.path.getmtime(self.path(marks.MARKS_FILE))
+        except OSError:
+            return None
+        return marks.FOCUS_PER_ROUND if 0 <= age <= marks.FOCUS_S else None
+
     def check_clock(self, now):
         """Every CAR_CLOCK_EVERY: read the car's clock and move the Pi's
         forward to it when the Pi is behind (after a power cut with no
@@ -400,7 +411,7 @@ class Autopilot:
         logged = snap
         if self.watch is not None:
             try:
-                extra = self.watch.round(self.elm)
+                extra = self.watch.round(self.elm, self.watch_pace(now))
             except (ElmError, OSError):
                 extra = {}  # the next round reconnects if it is gone
             if extra:

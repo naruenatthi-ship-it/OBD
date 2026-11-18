@@ -65,3 +65,17 @@ def test_mark_page_posts_a_mark(tmp_path):
         assert "ไฟหน้า เปิด" in result.decode("utf-8")
     finally:
         server.shutdown()
+
+
+def test_autopilot_reads_the_watch_list_fast_during_a_test(tmp_path):
+    from deepal_s05 import autopilot
+    t = 1_800_000_000.0
+    pilot = autopilot.Autopilot(lambda: None, [], [], str(tmp_path),
+                                clock=lambda: t, watch=[], set_clock=None)
+    assert pilot.watch_pace(t) is None                # no test yet
+    marks.add(str(tmp_path), "แอร์ เปิด")
+    import os
+    now = os.path.getmtime(tmp_path / marks.MARKS_FILE)
+    assert pilot.watch_pace(now + 60) == marks.FOCUS_PER_ROUND
+    assert pilot.watch_pace(now + marks.FOCUS_S + 1) is None
+    assert marks.step_wait(str(tmp_path)) >= 30
