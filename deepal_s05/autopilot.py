@@ -225,6 +225,9 @@ class Autopilot:
             capacity, cost.load_tariff(data_dir)["dc_price"])
         self.slow = snapshot.GroupCache()  # per-cell values every 30 s
         # watch=None: the default list; [] turns it off
+        self.private = private
+        self.watch_from_file = watch is None
+        self.watch_mtime = self.watch_file_mtime()
         keys = load_watch(data_dir, private) if watch is None else watch
         self.watch = WatchReader(
             keys, pos_path=os.path.join(data_dir, ".watch_pos")) \
@@ -347,6 +350,25 @@ class Autopilot:
             return False
         return current < -2  # charging is negative on the S05
 
+    def watch_file_mtime(self):
+        try:
+            return os.path.getmtime(self.path(WATCH_FILE))
+        except OSError:
+            return None
+
+    def reload_watch(self):
+        """The switch test page swaps watch_live.csv while autopilot runs:
+        pick up the new list without a restart."""
+        if not self.watch_from_file:
+            return
+        mtime = self.watch_file_mtime()
+        if mtime == self.watch_mtime:
+            return
+        self.watch_mtime = mtime
+        keys = load_watch(self.data_dir, self.private)
+        self.watch = WatchReader(
+            keys, pos_path=self.path(".watch_pos")) if keys else None
+
     def watch_pace(self, now):
         """Watch DIDs per round: many more while a switch test runs (a mark
         was made on the /mark page in the last FOCUS_S seconds)."""
@@ -409,6 +431,7 @@ class Autopilot:
             except (ElmError, OSError):
                 pass  # the next round reads the wheels again
         logged = snap
+        self.reload_watch()
         if self.watch is not None:
             try:
                 extra = self.watch.round(self.elm, self.watch_pace(now))

@@ -79,3 +79,53 @@ def test_autopilot_reads_the_watch_list_fast_during_a_test(tmp_path):
     assert pilot.watch_pace(now + 60) == marks.FOCUS_PER_ROUND
     assert pilot.watch_pace(now + marks.FOCUS_S + 1) is None
     assert marks.step_wait(str(tmp_path)) >= 30
+
+
+def test_guided_test_swaps_the_watch_list_and_puts_it_back(tmp_path):
+    from deepal_s05 import autopilot
+    d = str(tmp_path)
+    (tmp_path / "survey_results.csv").write_text(
+        "time,header,did,length,raw\n"
+        "2026-10-16T23:00:00,700,FE05,24,00\n"
+        "2026-10-16T23:00:01,780,FD0C,2,0000\n")    # FD0C is known
+    (tmp_path / "watch_live.csv").write_text("header,did\n7A7,FD18\n")
+    assert marks.prepare(d, ("700", "780")) == 1
+    assert autopilot.load_watch(d) == [("700", "FE05")]
+    marks.prepare(d, ("700",))                       # backup kept once
+    marks.restore(d)
+    assert autopilot.load_watch(d) == [("7A7", "FD18")]
+    assert marks.step_wait(d) >= 30
+
+
+def test_states_find_the_byte_that_holds_the_mode(tmp_path):
+    # 700 FE05 byte 0: EA while in Sport, EB in Eco; read once a minute
+    d = str(tmp_path)
+    rows, mode = [], "โหมด Eco"
+    for k in range(40):
+        t = T0 + datetime.timedelta(seconds=60 * k)
+        if k % 8 == 0:
+            mode = "โหมด Sport" if mode == "โหมด Eco" else "โหมด Eco"
+            marks.add(d, mode, t.timestamp())
+        v = 0xEA if mode == "โหมด Sport" else 0xEB
+        rows.append((t, "%02X%02X" % (v, k % 7), "00"))
+    with open(tmp_path / "drive_20261114.csv", "w") as f:
+        f.write("time,did_700_FE05,did_700_F1C1\n")
+        for t, a, b in rows:
+            f.write("%s,%s,%s\n" % (t.isoformat(), a, b))
+    found = marks.analyse_states(d)["โหมดขับ"]
+    assert found[0][:2] == ("did_700_FE05", 0)
+    assert "700 FE05 ไบต์ 0" in marks.report(d)
+
+
+def test_autopilot_picks_up_a_new_watch_list(tmp_path):
+    from deepal_s05 import autopilot
+    import os
+    (tmp_path / "watch_live.csv").write_text("header,did\n700,F2F3\n")
+    pilot = autopilot.Autopilot(lambda: None, [], [], str(tmp_path),
+                                set_clock=None)
+    assert pilot.watch.keys == [("700", "F2F3")]
+    (tmp_path / "watch_live.csv").write_text("header,did\n780,FD1A\n")
+    st = os.stat(tmp_path / "watch_live.csv")
+    os.utime(tmp_path / "watch_live.csv", (st.st_atime, st.st_mtime + 5))
+    pilot.reload_watch()
+    assert pilot.watch.keys == [("780", "FD1A")]

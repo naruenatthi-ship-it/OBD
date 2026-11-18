@@ -166,9 +166,14 @@ MARK_CSS = """
 """
 
 MARK_JS = r"""
-var WAIT = %(wait)d, PREP = 5, ROUNDS = 3, TESTS = %(tests)s;
+var WAIT = %(wait)d, PREP = 5, ROUNDS = %(rounds)d, TESTS = %(tests)s;
 var stopped = true, timer = null;
 function el(id){ return document.getElementById(id); }
+function post(body){
+  return fetch('/mark', {method:'POST', headers:{'Content-Type':'application/json',
+    'X-Requested-With':'deepal'}, body:JSON.stringify(body)})
+  .then(function(r){ return r.json(); });
+}
 function mark(e, b, done){
   fetch('/mark', {method:'POST', headers:{'Content-Type':'application/json',
     'X-Requested-With':'deepal'}, body:JSON.stringify({event:e})})
@@ -200,18 +205,28 @@ function result(){
   .then(function(t){ o.textContent = t; o.scrollIntoView({behavior:'smooth'}); })
   .catch(function(){ o.textContent = 'โหลดไม่ได้ เช็กว่ามือถือต่อ Pi อยู่'; });
 }
-function run(steps, name){
+function run(steps, name, index){
   var plan = [];
   for (var r = 1; r <= ROUNDS; r++)
     for (var i = 0; i < steps.length; i++) plan.push([steps[i], r]);
   stopped = false; el('stop').hidden = false;
-  show('', name, 'เริ่ม…', '');
+  show('', name, 'เตรียมรายการค่าที่จะอ่าน…', '');
   el('guide').scrollIntoView({behavior:'smooth', block:'center'});
+  post({prepare:index}).then(function(d){
+    if (d.wait) WAIT = d.wait;
+    var mins = Math.round(plan.length * (WAIT + PREP) / 60);
+    // the first step starts in the state of the second one, so the
+    // Pi has read every value before anything is changed
+    countdown(Math.max(20, Math.round(WAIT / 2)), function(n){
+      show('', name+' · อ่าน '+(d.n||0)+' ค่า ใช้เวลา ~'+mins+' นาที',
+           'ตั้งเป็น "'+steps[steps.length-1]+'" ไว้ก่อน', n);
+    }, function(){ next(0); });
+  }).catch(function(){ show('', name, 'ต่อ Pi ไม่ได้', '!'); stopped = true; });
   function next(k){
     if (stopped) return;
     if (k >= plan.length){
       show('', name, 'เสร็จแล้ว', '✓'); el('stop').hidden = true;
-      stopped = true; result(); return;
+      stopped = true; post({restore:1}).then(result, result); return;
     }
     var step = plan[k][0], top = name+' · รอบ '+plan[k][1]+'/'+ROUNDS;
     countdown(PREP, function(n){ show('', top+' · เตรียม', step, n); }, function(){
@@ -224,13 +239,13 @@ function run(steps, name){
       });
     });
   }
-  next(0);
 }
 document.querySelectorAll('.tests .btn').forEach(function(b, i){
-  b.onclick = function(){ if (stopped) run(TESTS[i][1], TESTS[i][0]); };
+  b.onclick = function(){ if (stopped) run(TESTS[i][1], TESTS[i][0], i); };
 });
 el('stop').onclick = function(){
   stopped = true; clearInterval(timer); el('stop').hidden = true;
+  post({restore:1});
   show('', 'หยุดแล้ว', 'กดหัวข้อเพื่อเริ่มใหม่', '–');
 };
 document.querySelectorAll('.manual .btn').forEach(function(b){
@@ -249,17 +264,18 @@ def mark_page(data_dir):
     wait = marks.step_wait(data_dir)
     tests = "".join(
         '<button class="btn tonal">%s</button>' % html.escape(name)
-        for name, _ in marks.TESTS)
+        for name, _, _ in marks.TESTS)
     buttons = "".join(
         '<button class="btn plain" data-e="%s">%s</button>'
         % (html.escape(e, quote=True), html.escape(e)) for e in marks.EVENTS)
-    js = MARK_JS % {"wait": wait, "tests": json.dumps(
-        [[n, list(st)] for n, st in marks.TESTS], ensure_ascii=False)}
+    js = MARK_JS % {"wait": wait, "rounds": marks.ROUNDS, "tests": json.dumps(
+        [[n, list(st)] for n, st, _ in marks.TESTS], ensure_ascii=False)}
     return (
         '<section class="card"><b>ทดสอบแบบนำทาง</b><p class="muted">'
         'เลือกหัวข้อ หน้าเว็บจะนับถอยหลังบอกว่าทำอะไรตอนไหน แล้วจดเวลาให้เอง'
-        ' ทำ 3 รอบ (แต่ละขั้นรอ %d วินาทีให้ Pi อ่านค่า) จบแล้วแสดงผลเอง'
-        ' · จอดรถ READY เกียร์ P · ระหว่างนี้ Pi อ่านค่าเร็วขึ้นเอง</p>'
+        ' ทำ %d รอบ จบแล้วแสดงผลเอง · ใช้เวลาหัวข้อละ ~10–15 นาที'
+        ' (Pi ต้องอ่านค่าครบทุกตัวในแต่ละขั้น)'
+        ' · <b>จอดรถเท่านั้น</b> READY เกียร์ P</p>'
         '<div class="marks tests">%s</div>'
         '<div id="guide" hidden></div>'
         '<button class="btn plain" id="stop" hidden style="width:100%%;'
@@ -277,7 +293,7 @@ def mark_page(data_dir):
         '</p><button class="btn tonal" id="res" style="width:100%%">ดูผล'
         '</button><pre id="out" style="white-space:pre-wrap;font-size:13px;'
         'margin-top:10px"></pre></section>'
-        '<script>%s</script>' % (wait, tests, buttons, js))
+        '<script>%s</script>' % (marks.ROUNDS, tests, buttons, js))
 
 
 WIFI_TOOL = ("ตั้งค่า", (
@@ -790,6 +806,21 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 req = {}
             if not isinstance(req, dict):
                 req = {}
+            if path == "/mark" and ("prepare" in req or "restore" in req):
+                from . import marks
+                reply = {}
+                try:
+                    if "prepare" in req:
+                        _, _, headers = marks.TESTS[int(req["prepare"])]
+                        reply["n"] = marks.prepare(data_dir, headers)
+                        reply["wait"] = marks.step_wait(data_dir)
+                    else:
+                        marks.restore(data_dir)
+                except (IndexError, TypeError, ValueError, OSError):
+                    reply["error"] = 1
+                self.send_body(json.dumps(reply).encode("utf-8"),
+                               "application/json; charset=utf-8")
+                return
             if path == "/mark":
                 from . import marks
                 event = str(req.get("event") or "").strip()
