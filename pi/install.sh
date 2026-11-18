@@ -62,6 +62,8 @@ echo "==> อนุญาตให้โปรแกรมสั่งปิด�
     # the dashboard's WiFi page (only on the phone hotspot) saves,
     # ranks and switches networks
     echo "$USER_NAME ALL=(root) NOPASSWD: $(command -v nmcli || echo /usr/bin/nmcli)"
+    # set the clock forward from the car's clock (never back)
+    echo "$USER_NAME ALL=(root) NOPASSWD: $APP/pi/deepal-clock.sh forward *"
     for action in start stop restart; do
         echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl $action deepal-obd"
     done

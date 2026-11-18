@@ -78,6 +78,7 @@ def make(tmp_path, volts, values=None, **kw):
             "soc": 80, "pack_current": 1.0, "batt_temp_max": 30,
             "aux_12v": 14.0}))
 
+    kw.setdefault("set_clock", None)    # the car clock has its own test
     pilot = autopilot.Autopilot(lambda: elm, [], [], str(tmp_path),
                                 clock=clock, **kw)
     return pilot, elm, clock, taken, take
@@ -290,7 +291,7 @@ def make_probe(tmp_path, monkeypatch, current, values):
     monkeypatch.setattr(autopilot.snapshot, "take", take)
     sig = next(s for s in pids.SIGNALS if s.key == "pack_current")
     pilot = autopilot.Autopilot(lambda: elm, [sig], [], str(tmp_path),
-                                clock=clock, watch=[])
+                                clock=clock, watch=[], set_clock=None)
     return pilot, elm, clock, taken
 
 
@@ -339,3 +340,34 @@ def test_watch_list_resumes_where_it_stopped(tmp_path):
         w.round(elm)
     again = autopilot.WatchReader(keys, pos_path=pos)
     assert again.pos == autopilot.WATCH_SAVE_EVERY * autopilot.WATCH_PER_ROUND
+
+
+def test_car_clock_moves_a_slow_pi_clock_forward(tmp_path, monkeypatch):
+    # 18 Nov: the car's clock (754 F1F4) went right at 02:09 by the Pi's
+    # clock, which only caught up an hour later on network time
+    import datetime as dt
+    real = dt.datetime(2026, 11, 18, 8, 11, 23)
+    raw = bytes([real.year - 2013, real.month, real.day, real.hour,
+                 real.minute, real.second])
+    assert autopilot.car_time(raw) == real.timestamp()
+    assert autopilot.car_time(bytes([13, 13, 1, 0, 0, 0])) is None
+
+    class ClockElm(FakeElm):
+        def read_did(self, header, did):
+            if (header, did) == ("754", 0xF1F4):
+                return raw
+            return super().read_did(header, did)
+    set_to = []
+    clock = Clock(real.timestamp() - 6 * 3600)
+    elm = ClockElm([13.9])
+    monkeypatch.setattr(autopilot.snapshot, "take",
+                        lambda *a, **k: Snapshot(clock.t, {"soc": 80}))
+    pilot = autopilot.Autopilot(lambda: elm, [], [], str(tmp_path),
+                                clock=clock, watch=[],
+                                set_clock=set_to.append)
+    pilot.step()
+    assert set_to == [real.timestamp()]
+    clock.t = real.timestamp() + 3600         # the Pi ahead: never back
+    pilot.last_clock_check = None
+    pilot.step()
+    assert set_to == [real.timestamp()]

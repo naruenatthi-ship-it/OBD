@@ -43,3 +43,18 @@ def test_restore_never_moves_the_clock_back(tmp_path):
 def test_save_keeps_the_time(tmp_path):
     rc, _, clock = run(tmp_path, "save", 4242)
     assert rc == 0 and clock.read_text().strip() == "4242"
+
+
+def test_forward_only_moves_ahead(tmp_path):
+    rc, setto, _ = run(tmp_path, "restore", 1000)          # make the fakes
+    env_run = lambda ts: subprocess.run(
+        ["sh", SCRIPT, "forward", ts],
+        env=dict(os.environ, PATH="%s:%s" % (tmp_path / "bin",
+                                             os.environ["PATH"]),
+                 NOW=str(tmp_path / "now"), SET=str(tmp_path / "set"),
+                 CLOCK_FILE=str(tmp_path / ".clock"))).returncode
+    assert env_run("5000") == 0
+    assert (tmp_path / "set").read_text().strip() == "@5000"
+    (tmp_path / "set").unlink()
+    assert env_run("500") == 0 and not (tmp_path / "set").exists()
+    assert env_run("x") == 2

@@ -15,7 +15,13 @@ case "$1" in
         fi ;;
     save)
         date +%s > "$F.tmp" && mv "$F.tmp" "$F" ;;
+    forward)
+        # the time read from the car's own clock (autopilot, via sudo)
+        case "$2" in ''|*[!0-9]*) exit 2 ;; esac
+        if [ "$2" -gt "$(date +%s)" ]; then
+            date -s "@$2" >/dev/null && echo "$2" > "$F"
+        fi ;;
     *)
-        echo "usage: $0 restore|save" >&2
+        echo "usage: $0 restore|save|forward SECONDS" >&2
         exit 2 ;;
 esac

@@ -29,8 +29,41 @@ from .elm327 import ElmError, NegativeResponse, NoData
 WATCH_FILE = "watch_live.csv"  # DIDs still being worked out (header,did)
 CHARGE_PROBE_EVERY = 300.0     # seconds between "are you charging?" asks
 CHARGE_PROBE_WINDOW = 3 * 3600  # only this long after the car was awake
+# The car's own clock: 754 F1F4 = years since 2013, month, day, hour,
+# minute, second (found 18 Nov 2026: it set itself right an hour before the
+# Pi got network time). The Pi has no clock battery, so it is moved
+# forward to the car's time when it is behind by more than CLOCK_SLACK_S.
+CAR_CLOCK = ("754", 0xF1F4)
+CAR_CLOCK_EVERY = 600.0
+CLOCK_SLACK_S = 120.0
+CLOCK_SCRIPT = "/opt/deepal-obd/pi/deepal-clock.sh"
 WATCH_PER_ROUND = 8
 WATCH_SAVE_EVERY = 10          # rounds between saves of the list position            # 32 DIDs: each one about every 4 rounds
+
+
+def car_time(raw):
+    """Seconds since the epoch from a 754 F1F4 reply, or None."""
+    if len(raw) < 6:
+        return None
+    try:
+        t = datetime.datetime(2013 + raw[0], raw[1], raw[2], raw[3], raw[4],
+                              raw[5])
+    except ValueError:
+        return None
+    if not 2024 <= t.year <= 2099:
+        return None
+    return t.timestamp()
+
+
+def set_clock_forward(seconds):
+    """Move the Pi's clock forward (root only: through the clock script)."""
+    import subprocess
+    try:
+        subprocess.run(["sudo", "-n", CLOCK_SCRIPT, "forward",
+                        str(int(seconds))], timeout=10, check=False,
+                       capture_output=True)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def load_watch(data_dir, private=()):
@@ -170,7 +203,7 @@ class Autopilot:
                  checkup_days=7.0, run_checkup=None, shutdown_below=None,
                  shutdown_after=600.0, shutdown=None, clock=time.time,
                  info=None, vehicle=None, baselines=None, private=(),
-                 watch=None):
+                 watch=None, set_clock=set_clock_forward):
         self.open_elm = open_elm
         self.signals, self.arrays = signals, arrays
         self.data_dir = data_dir
@@ -214,6 +247,8 @@ class Autopilot:
         self.last_probe = None
         self.probe_off = False      # the BMS did not answer: wait for a wake
         self.last_values = {}
+        self.set_clock = set_clock
+        self.last_clock_check = None
 
     # -- helpers ---------------------------------------------------------
     def path(self, name):
@@ -311,9 +346,28 @@ class Autopilot:
             return False
         return current < -2  # charging is negative on the S05
 
+    def check_clock(self, now):
+        """Every CAR_CLOCK_EVERY: read the car's clock and move the Pi's
+        forward to it when the Pi is behind (after a power cut with no
+        network). Never moves it back."""
+        if self.set_clock is None or (
+                self.last_clock_check is not None and
+                now - self.last_clock_check < CAR_CLOCK_EVERY):
+            return
+        self.last_clock_check = now
+        try:
+            t = car_time(self.elm.read_did(*CAR_CLOCK))
+        except (ElmError, OSError):
+            return
+        if t is not None and t - now > CLOCK_SLACK_S:
+            print("autopilot: นาฬิกา Pi ช้ากว่ารถ %.0f วินาที ตั้งตามรถ"
+                  % (t - now), flush=True)
+            self.set_clock(t)
+
     def awake_round(self, now, v12):
         self.low_since = None
         self.awake_seen = now
+        self.check_clock(now)
         if self.awake_since is None:
             self.awake_since = now
             # `obd stop` paused the survey until the car is started again;
