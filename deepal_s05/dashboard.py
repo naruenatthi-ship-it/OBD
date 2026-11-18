@@ -178,6 +178,11 @@ def mark_page():
         'var(--ink)"></p><button class="btn tonal" id="send" style="width:'
         '100%%;margin-top:8px">จดอันที่พิมพ์</button>'
         '<p class="muted" id="last"></p></section>'
+        '<section class="card"><b>ผล</b><p class="muted">ค่าไหนเปลี่ยนตามปุ่มที่กด'
+        ' (กดซ้ำอย่างละ 3 รอบ แล้วรอ 2–3 นาทีให้ Pi อ่านค่าครบ ก่อนดูผล)</p>'
+        '<button class="btn tonal" id="res" style="width:100%%">ดูผล</button>'
+        '<pre id="out" style="white-space:pre-wrap;font-size:13px;margin-top:'
+        '10px"></pre></section>'
         "<script>"
         "function mark(e,b){fetch('/mark',{method:'POST',headers:{"
         "'Content-Type':'application/json','X-Requested-With':'deepal'},"
@@ -192,6 +197,11 @@ def mark_page():
         "document.getElementById('send').onclick=function(){"
         "var v=document.getElementById('other').value.trim();"
         "if(v){mark(v);document.getElementById('other').value=''}};"
+        "document.getElementById('res').onclick=function(){"
+        "var o=document.getElementById('out');o.textContent='กำลังคำนวณ...';"
+        "fetch('/mark.txt',{cache:'no-store'}).then(function(r){return r.text()})"
+        ".then(function(t){o.textContent=t})"
+        ".catch(function(){o.textContent='โหลดไม่ได้ เช็กว่ามือถือต่อ Pi อยู่'})};"
         "</script>" % buttons)
 
 
@@ -768,6 +778,10 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 self.html(ui.shell("WiFi ของ Pi", WIFI_BODY, back="/tools",
                                    active="tools", css=WIFI_CSS,
                                    sub="ดู เพิ่ม ลบ และเรียงลำดับ"))
+            elif local and data_dir and path == "/mark.txt":
+                from . import marks
+                self.send_body(marks.report(data_dir).encode("utf-8"),
+                               "text/plain; charset=utf-8")
             elif local and data_dir and path == "/mark":
                 self.html(ui.shell("ทดสอบสวิตช์", mark_page(), back="/tools",
                                    active="tools", css=MARK_CSS,

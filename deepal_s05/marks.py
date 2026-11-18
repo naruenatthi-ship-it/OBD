@@ -71,8 +71,17 @@ def read_did_series(data_dir, start, end):
     """{column: [(time, raw bytes)]} for the did_ columns of drive_ and
     rec_ files, between start and end."""
     series = {}
-    paths = glob.glob(os.path.join(data_dir, "drive_*.csv")) + \
-        glob.glob(os.path.join(data_dir, "rec_*.csv"))
+    days = set()
+    d = start.date()
+    while d <= end.date():
+        days.add(d.strftime("%Y%m%d"))
+        d += datetime.timedelta(days=1)
+    # only the days of the marks: a Pi Zero reading every drive file of
+    # the month for one page would take too long
+    paths = [p for p in glob.glob(os.path.join(data_dir, "drive_*.csv"))
+             if os.path.basename(p)[6:14] in days]
+    paths += [p for p in glob.glob(os.path.join(data_dir, "rec_*.csv"))
+              if any(day in os.path.basename(p) for day in days)]
     for path in sorted(paths):
         try:
             with open(path, newline="", encoding="utf-8",

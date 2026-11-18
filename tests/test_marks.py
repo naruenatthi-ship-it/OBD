@@ -61,5 +61,7 @@ def test_mark_page_posts_a_mark(tmp_path):
         reply = json.loads(urllib.request.urlopen(req).read())
         assert reply["time"]
         assert marks.read_marks(str(tmp_path))[0][1] == "ไฟหน้า เปิด"
+        result = urllib.request.urlopen(base + "/mark.txt").read()
+        assert "ไฟหน้า เปิด" in result.decode("utf-8")
     finally:
         server.shutdown()
