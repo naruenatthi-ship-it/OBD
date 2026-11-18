@@ -190,7 +190,7 @@ def is_29bit(header):
 
 # Requests the client is allowed to put on the bus (hex, no spaces)
 ALLOWED_REQUESTS = re.compile(
-    r"^(22[0-9A-F]{4}|1902[0-9A-F]{2}|1904[0-9A-F]{8}|1001|1003|3E00)$")
+    r"^(22(?:[0-9A-F]{4}){1,8}|1902[0-9A-F]{2}|1904[0-9A-F]{8}|1001|1003|3E00)$")
 
 
 class Elm327:
@@ -363,6 +363,25 @@ class Elm327:
         if len(msg) < 3 or (msg[1] << 8 | msg[2]) != did:
             raise NoData("reply for another DID: %s" % msg.hex().upper())
         return msg[3:]
+
+    def read_dids(self, header, dids, lengths):
+        """Several DIDs in one ReadDataByIdentifier request (ISO 14229
+        allows a list; still a read). `lengths` are the data lengths the
+        survey saw, needed to split the reply. Returns {did: data}; raises
+        NoData/NegativeResponse when the ECU does not take a list."""
+        if not 1 <= len(dids) <= 8:
+            raise ValueError("1 to 8 DIDs per request")
+        msg = self._positive(header, "22" + "".join("%04X" % d for d in dids))
+        out, i = {}, 1
+        for did, n in zip(dids, lengths):
+            if i + 2 + n > len(msg) or (msg[i] << 8 | msg[i + 1]) != did:
+                raise NoData("multi-DID reply does not fit: %s"
+                             % msg.hex().upper())
+            out[did] = msg[i + 2:i + 2 + n]
+            i += 2 + n
+        if i != len(msg):
+            raise NoData("multi-DID reply too long: %s" % msg.hex().upper())
+        return out
 
     def read_dtcs(self, header, mask=0xFF):
         """ReadDTCInformation, reportDTCByStatusMask. Returns the raw

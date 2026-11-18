@@ -371,3 +371,56 @@ def test_car_clock_moves_a_slow_pi_clock_forward(tmp_path, monkeypatch):
     pilot.last_clock_check = None
     pilot.step()
     assert set_to == [real.timestamp()]
+
+
+class BatchElm(FakeElm):
+    """700 takes several DIDs per request; 780 only one at a time."""
+    def __init__(self):
+        super().__init__([13.9])
+        self.requests = []
+
+    def read_did(self, header, did):
+        self.requests.append((header, [did]))
+        return bytes([did & 0xFF])
+
+    def read_dids(self, header, dids, lengths):
+        from deepal_s05.elm327 import NegativeResponse
+        self.requests.append((header, list(dids)))
+        if header == "780":
+            raise NegativeResponse(0x22, 0x13)
+        return {d: bytes([d & 0xFF]) * n for d, n in zip(dids, lengths)}
+
+
+def test_watch_reads_several_dids_per_request(tmp_path):
+    keys = [("700", "%04X" % (0xF100 + n)) for n in range(10)] + \
+        [("780", "FD0C"), ("780", "FD0D")]
+    lengths = {k: 1 for k in keys}
+    w = autopilot.WatchReader(keys, lengths=lengths)
+    elm = BatchElm()
+    out = w.round(elm, per_round=12)
+    assert all(out["did_%s_%s" % k] for k in keys)
+    assert elm.requests[0] == ("700", list(range(0xF100, 0xF108)))
+    assert elm.requests[1] == ("700", [0xF108, 0xF109])
+    # 780 refused the list: one try, then one DID a request from then on
+    assert "780" in w.single
+    elm.requests.clear()
+    w.round(elm, per_round=12)
+    assert ("780", [0xFD0C]) in elm.requests and \
+        ("780", [0xFD0C, 0xFD0D]) not in elm.requests
+
+
+def test_multi_did_request_is_allowed_and_split():
+    from deepal_s05.elm327 import ALLOWED_REQUESTS, Elm327
+    assert ALLOWED_REQUESTS.match("22F1A8F1AB")
+    assert not ALLOWED_REQUESTS.match("22F1A8F1AB2E")
+    assert not ALLOWED_REQUESTS.match("22" + "F1A8" * 9)
+
+    class Fake(Elm327):
+        def __init__(self):
+            pass
+
+        def _positive(self, header, payload, timeout=None):
+            assert payload == "22F1A8F1AB"
+            return bytes.fromhex("62F1A80102F1AB03")
+    got = Fake().read_dids("700", [0xF1A8, 0xF1AB], [2, 1])
+    assert got == {0xF1A8: b"\x01\x02", 0xF1AB: b"\x03"}

@@ -38,6 +38,8 @@ CAR_CLOCK_EVERY = 600.0
 CLOCK_SLACK_S = 120.0
 CLOCK_SCRIPT = "/opt/deepal-obd/pi/deepal-clock.sh"
 WATCH_PER_ROUND = 8
+BATCH_DIDS = 8                 # DIDs in one multi-DID request
+BATCH_BYTES = 120              # data bytes in one multi-DID reply
 WATCH_SAVE_EVERY = 10          # rounds between saves of the list position            # 32 DIDs: each one about every 4 rounds
 
 
@@ -64,6 +66,16 @@ def set_clock_forward(seconds):
                        capture_output=True)
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+def survey_lengths(data_dir):
+    """{(header, did): data length} from survey_results.csv."""
+    from . import reverse
+    try:
+        return {k: len(v) for k, v in reverse.read_scan(
+            os.path.join(data_dir, "survey_results.csv")).items()}
+    except (OSError, ValueError, KeyError):
+        return {}
 
 
 def load_watch(data_dir, private=()):
@@ -102,7 +114,8 @@ class WatchReader:
     stop, and starting from the top each time a long list never got past
     its first ECUs."""
 
-    def __init__(self, keys, per_round=WATCH_PER_ROUND, pos_path=None):
+    def __init__(self, keys, per_round=WATCH_PER_ROUND, pos_path=None,
+                 lengths=None, clock=time.time):
         self.keys, self.per_round = list(keys), per_round
         self.pos_path = pos_path
         self.pos = 0
@@ -114,9 +127,43 @@ class WatchReader:
                 pass
         self.refused = set()
         self.rounds = 0
+        # data lengths from the survey: with them several DIDs of one ECU
+        # go in one request (22 DID DID ...), ~8 times faster over BLE;
+        # an ECU that refuses a list is asked one DID at a time
+        self.lengths = lengths or {}
+        self.single = set()
+        self.clock = clock
+        self.lap_start = None
+        self.lap_s = None      # how long the whole list took last time
 
     def wake(self):
         self.refused.clear()
+
+    def _read_batch(self, elm, keys, out):
+        """True when the ECU answered the list; False to read one by one."""
+        header = keys[0][0]
+        if len(keys) < 2 or header in self.single or \
+                not hasattr(elm, "read_dids"):
+            return False
+        dids = [int(k[1], 16) for k in keys]
+        try:
+            got = elm.read_dids(header, dids,
+                                [self.lengths[k] for k in keys])
+        except (NegativeResponse, NoData, ValueError):
+            self.single.add(header)
+            return False
+        for k, did in zip(keys, dids):
+            out["did_%s_%s" % k] = got[did].hex().upper()
+        return True
+
+    def _read_one(self, elm, key, out):
+        try:
+            out["did_%s_%s" % key] = elm.read_did(
+                key[0], int(key[1], 16)).hex().upper()
+        except NegativeResponse:
+            self.refused.add(key)
+        except NoData:
+            pass
 
     def round(self, elm, per_round=None):
         per_round = per_round or self.per_round
@@ -124,16 +171,34 @@ class WatchReader:
         # every column from the first row: the day's file is rewritten
         # once for new columns, not once per DID
         out = {"did_%s_%s" % k: "" for k in live}
+        if not live:
+            return out
+        todo = []
         for _ in range(min(per_round, len(live))):
-            key = live[self.pos % len(live)]
+            if self.pos % len(live) == 0:
+                now = self.clock()
+                if self.lap_start is not None:
+                    self.lap_s = now - self.lap_start
+                self.lap_start = now
+            todo.append(live[self.pos % len(live)])
             self.pos += 1
-            try:
-                out["did_%s_%s" % key] = elm.read_did(
-                    key[0], int(key[1], 16)).hex().upper()
-            except NegativeResponse:
-                self.refused.add(key)
-            except NoData:
-                pass
+        k = 0
+        while k < len(todo):
+            # a run of DIDs of one ECU with known lengths, <= 8 and short
+            batch = [todo[k]]
+            size = self.lengths.get(todo[k], 999)
+            while k + len(batch) < len(todo) and len(batch) < BATCH_DIDS:
+                nxt = todo[k + len(batch)]
+                n = self.lengths.get(nxt)
+                if nxt[0] != batch[0][0] or n is None or \
+                        size + n > BATCH_BYTES:
+                    break
+                batch.append(nxt)
+                size += n
+            if not self._read_batch(elm, batch, out):
+                for key in batch:
+                    self._read_one(elm, key, out)
+            k += len(batch)
         self.rounds += 1
         if self.pos_path and self.rounds % WATCH_SAVE_EVERY == 0:
             try:
@@ -229,9 +294,7 @@ class Autopilot:
         self.watch_from_file = watch is None
         self.watch_mtime = self.watch_file_mtime()
         keys = load_watch(data_dir, private) if watch is None else watch
-        self.watch = WatchReader(
-            keys, pos_path=os.path.join(data_dir, ".watch_pos")) \
-            if keys else None
+        self.watch = self.make_watch(keys)
         self.tyres = tyres.Monitor(data_dir, clock) if any(
             s.key == "motor_rpm" for s in signals) else None
         self.baselines = baselines or {}  # usual values, from checkups
@@ -365,9 +428,14 @@ class Autopilot:
         if mtime == self.watch_mtime:
             return
         self.watch_mtime = mtime
-        keys = load_watch(self.data_dir, self.private)
-        self.watch = WatchReader(
-            keys, pos_path=self.path(".watch_pos")) if keys else None
+        self.watch = self.make_watch(load_watch(self.data_dir, self.private))
+
+    def make_watch(self, keys):
+        if not keys:
+            return None
+        return WatchReader(keys, pos_path=self.path(".watch_pos"),
+                           lengths=survey_lengths(self.data_dir),
+                           clock=self.clock)
 
     def watch_pace(self, now):
         """Watch DIDs per round: many more while a switch test runs (a mark
@@ -433,10 +501,21 @@ class Autopilot:
         logged = snap
         self.reload_watch()
         if self.watch is not None:
+            lap = self.watch.lap_s
             try:
                 extra = self.watch.round(self.elm, self.watch_pace(now))
             except (ElmError, OSError):
                 extra = {}  # the next round reconnects if it is gone
+            if self.watch.lap_s != lap:
+                # the switch test page times its steps on this
+                try:
+                    with open(self.path(".watch_lap"), "w") as f:
+                        # seconds per DID: the test page scales it to the
+                        # list it has just swapped in
+                        f.write("%.3f" % (self.watch.lap_s /
+                                          max(len(self.watch.keys), 1)))
+                except OSError:
+                    pass
             if extra:
                 # raw hex is for the file only, not the dashboard
                 logged = snapshot.Snapshot(snap.time,

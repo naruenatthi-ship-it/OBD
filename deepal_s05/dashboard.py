@@ -229,6 +229,9 @@ function run(steps, name, index){
       stopped = true; post({restore:1}).then(result, result); return;
     }
     var step = plan[k][0], top = name+' · รอบ '+plan[k][1]+'/'+ROUNDS;
+    // the Pi measures how fast it reads: take its latest figure
+    fetch('/mark.wait', {cache:'no-store'}).then(function(r){ return r.text(); })
+    .then(function(t){ var w = parseInt(t, 10); if (w > 0) WAIT = w; }).catch(function(){});
     countdown(PREP, function(n){ show('', top+' · เตรียม', step, n); }, function(){
       show('go', top, 'ทำเลย: '+step, '!');
       if (navigator.vibrate) navigator.vibrate(300);
@@ -884,6 +887,10 @@ def make_server(poller, host="127.0.0.1", port=8000, data_dir=None,
                 self.html(ui.shell("WiFi ของ Pi", WIFI_BODY, back="/tools",
                                    active="tools", css=WIFI_CSS,
                                    sub="ดู เพิ่ม ลบ และเรียงลำดับ"))
+            elif local and data_dir and path == "/mark.wait":
+                from . import marks
+                self.send_body(str(marks.step_wait(data_dir)).encode(),
+                               "text/plain; charset=utf-8")
             elif local and data_dir and path == "/mark.txt":
                 from . import marks
                 self.send_body(marks.report(data_dir).encode("utf-8"),

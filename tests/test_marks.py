@@ -78,7 +78,7 @@ def test_autopilot_reads_the_watch_list_fast_during_a_test(tmp_path):
     now = os.path.getmtime(tmp_path / marks.MARKS_FILE)
     assert pilot.watch_pace(now + 60) == marks.FOCUS_PER_ROUND
     assert pilot.watch_pace(now + marks.FOCUS_S + 1) is None
-    assert marks.step_wait(str(tmp_path)) >= 30
+    assert marks.step_wait(str(tmp_path)) >= 20
 
 
 def test_guided_test_swaps_the_watch_list_and_puts_it_back(tmp_path):
@@ -94,7 +94,8 @@ def test_guided_test_swaps_the_watch_list_and_puts_it_back(tmp_path):
     marks.prepare(d, ("700",))                       # backup kept once
     marks.restore(d)
     assert autopilot.load_watch(d) == [("7A7", "FD18")]
-    assert marks.step_wait(d) >= 30
+    assert marks.step_wait(d) >= 20
+    assert marks.step_wait(d, lap_s=30) == 44     # measured lap wins
 
 
 def test_states_find_the_byte_that_holds_the_mode(tmp_path):

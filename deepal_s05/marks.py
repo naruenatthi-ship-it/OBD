@@ -19,7 +19,7 @@ WINDOW_S = 90      # a reading this close before / after a mark counts
 QUIET_S = 600      # changes this far from any mark count as noise
 
 FOCUS_S = 900          # after a mark, autopilot reads the watch list fast
-FOCUS_PER_ROUND = 40   # watch DIDs per round meanwhile (normally 8)
+FOCUS_PER_ROUND = 120  # watch DIDs per round meanwhile (normally 8)
 READ_S = 0.45          # one DID over Bluetooth (18 Nov: 28 reads in 19 s)
 ROUND_S = 5.0          # the rest of an autopilot round
 ROUNDS = 2             # times each guided test goes through its steps
@@ -49,11 +49,25 @@ def cycle_s(n):
     return n * READ_S + -(-n // FOCUS_PER_ROUND) * ROUND_S
 
 
-def step_wait(data_dir):
-    """Seconds to hold each step: every watch DID read at least once."""
+def step_wait(data_dir, lap_s=None):
+    """Seconds to hold each step: every watch DID read at least once. Uses
+    the seconds per DID autopilot last measured going round its list
+    (.watch_lap) when that is fresh, else an estimate for one DID a request
+    (the slow case: ECUs that refuse multi-DID requests)."""
     from . import autopilot
     n = len(autopilot.load_watch(data_dir))
-    return int(max(30, cycle_s(n) * 1.2 + 10))
+    if lap_s is None:
+        path = os.path.join(data_dir, ".watch_lap")
+        try:
+            import time
+            if time.time() - os.path.getmtime(path) < 4 * 3600:
+                with open(path) as f:
+                    lap_s = float(f.read()) * n
+        except (OSError, ValueError):
+            pass
+    if lap_s is None:
+        lap_s = cycle_s(n)
+    return int(max(20, lap_s * 1.3 + 5))
 
 
 def prepare(data_dir, headers):
